@@ -10,6 +10,7 @@ from native_direct_container_check import signature_rows, vertex
 from native_scalar_lds_check import sop1, vmove
 
 NOP = 0xbf800000
+ARM_WORD = 8
 ARM_B_COMPARE = 15
 JOIN = 17
 LANE_JOIN = 17
@@ -33,13 +34,14 @@ def program(arm_b):
            0x7d0a0082, vmove(4, 246),               # B: VCC = id != 2, v4 = 4
            vmove(5, 240), cndmask(5, 4, 261),   # after the join: VCC ? v4 : 0.5
            0xf80000cf, 0x07030201, 0xf8000a0f, 0x05050405, 0xbf810000]
-    assert seq[ARM_B_COMPARE] == 0x7d0a0082 and seq[JOIN] == vmove(5, 240)
+    assert seq[ARM_WORD] == arm_b and seq[ARM_B_COMPARE] == 0x7d0a0082 and seq[JOIN] == vmove(5, 240)
     return seq
 
 
 def lane_program():
     # The compare itself splits the wave: vertex 1 runs THEN, the others ELSE.
     # VCC is written once, before the region, and read after EXEC is restored.
+    # The frontend lowers these arms to per-vertex selects in one block.
     seq = program(False)[:7]
     # A masked write keeps the previous v4 on the other lanes.
     seq += [vmove(4, 242),
@@ -115,7 +117,7 @@ def main(cli, raster, sdk, backend):
         dropped = program(True)
         dropped[ARM_B_COMPARE] = NOP
         print("dropped arm B contribution:", differs(draw(dropped, reference(True))))
-        dropped[8] = 0
+        dropped[ARM_WORD] = 0
         assert draw(dropped, reference(False)).returncode == 0
         # Control: a uniform v0 == v0 replaces the joined mask.
         for arm_b in (False, True):
