@@ -2235,8 +2235,8 @@ These are measured on one executable; treat them as hypotheses for others.
   [#2618](https://github.com/R0Y00/Xbox2Windows/issues/2618)
 - **Select on descriptor data.** In a compute stage, `s_cselect_b32 sD, a, b` with one source a number computed
   from a descriptor (`descnum`) and the others constants, such as `sX, 0, sX`, emits no HLSL. sD keeps both arms as
-  a symbol with no run-time value. A numeric read, scalar ALU other than a move, or a descriptor operand holding it is
-  refused, so an arm that zeroes a buffer's size is never dropped
+  a symbol with no run-time value. A numeric read, scalar ALU other than a move, or a descriptor operand holding it
+  (also as a word joined at a branch target) is refused, so an arm that zeroes a buffer's size is never dropped
   ([the note](experiments/startup-gfx2hlsl-cselect-descnum.md)). Run
   `ctest --preset dev --no-tests=error -R "^startup_gfx2hlsl_cselect_descnum"`.
   [#2618](https://github.com/R0Y00/Xbox2Windows/issues/2618)

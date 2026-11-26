@@ -2822,6 +2822,9 @@ class Stage:
             # Only the first word names the resource below; a select of descriptor data in any word (such as a
             # size word zeroed on one arm) would be dropped, so the access refuses.
             raise Unsupported('descriptor operand %s: s%d holds a select of descriptor data' % (tok, held))
+        held = self.joined_word(tok)
+        if held is not None:
+            raise Unsupported('descriptor operand %s: s%d holds a word joined at a branch target' % (tok, held))
         s = self.sym.get(r[1]) if r else None
         if r and r[0] == 's' and r[1] <= 107 and r[2] >= 106:
             if getattr(self, 'has_branches', False):
@@ -2849,6 +2852,16 @@ class Stage:
         if not r or r[0] != 's':
             return None
         return next((n for n in range(r[1], min(r[2], 105) + 1) if descriptor_select(self.sym.get(n))), None)
+
+    def joined_word(self, tok):
+        """In compute, the first SGPR after the first word of operand tok that holds a value joined at a branch
+        target, or None. The paths bring different words there, a select of descriptor data possibly among them,
+        and the access names its resource by the first word only. A loop head joins the same way."""
+        r = reg_range(tok)
+        if getattr(self, 'kind', None) != 'cs' or not r or r[0] != 's':
+            return None
+        return next((n for n in range(r[1] + 1, min(r[2], 105) + 1)
+                     if (self.sym.get(n) or ('',))[0] == 'joined at a branch target'), None)
 
     def heap_sampler(self, tok):
         """'qh[...]' when the four sampler words of tok came from one run-time sampler heap load."""
@@ -5399,8 +5412,8 @@ class Stage:
                     self.set_s(dst[1], '0u', ('const', 0), scc='false')
                     return None
             raise Unsupported('TG_SIZE register s%d read outside s_and_b32 with 0xfc0' % tg_srcs[0])
+        self.refuse_select_source(base, ops[1:])  # whole ranges: srcs names only the low word of a pair
         if any(s and s[0] in ('desc', 'descnum', 'ptr', 'ptrhi') for s in syms):
-            self.refuse_select_source(base, syms)
             if 'src_scc' in srcs and not getattr(self, 'scc_verified', False):
                 raise Unsupported('src_scc with unverified SCC')
             if scc or base in SCC_UNMODELLED:
@@ -5930,11 +5943,17 @@ class Stage:
         value = self.const_u32(tok)
         return None if value is None else ('const', value)
 
-    def refuse_select_source(self, base, syms):
-        """A scalar ALU source holding a select of descriptor data: a move copies the symbol, anything else would
-        turn it into an unrelated descnum or descriptor edit, losing the arm that SCC picks, so it refuses."""
-        if base not in ('s_mov_b32', 's_mov_b64') and any(descriptor_select(s) for s in syms):
-            raise Unsupported('%s on a select of descriptor data' % base)
+    def refuse_select_source(self, base, srcs):
+        """A scalar ALU source holding a select of descriptor data in any of its registers (the high word of a pair
+        too): a move copies the symbol, anything else would turn it into an unrelated descnum or descriptor edit,
+        losing the arm that SCC picks, so it refuses."""
+        if base in ('s_mov_b32', 's_mov_b64'):
+            return
+        for tok in srcs:
+            r = reg_range(tok)
+            regs = ['m0'] if tok == 'm0' else range(r[1], r[2] + 1) if r and r[0] == 's' else ()
+            if any(descriptor_select(self.sym.get(n)) for n in regs):
+                raise Unsupported('%s on a select of descriptor data' % base)
 
     def smem_soffset(self, tok, record_use=True):
         """Runtime expression for an SMEM scalar offset operand (s0..s105 or m0)."""

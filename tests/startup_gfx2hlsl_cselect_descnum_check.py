@@ -17,14 +17,19 @@ Checked (controls):
   the HLSL differs from case A only by the compare's scc line, and sX holds both arms and the select's offset;
 - refused, each with its reason: numeric reads (v_mov, s_cmp, v_cmp, m0), scalar ALU on the result, the
   structured-to-raw conversion with the selected stride, a copy into the load descriptor's word 1, 2 or 3 (also
-  through a second copy), a copy into the store descriptor, SCC from an ALU on descriptor data, and a read after a
-  forward join or at a loop head that a path brings the select to (the same join without the select translates);
+  through a second copy), a copy into the store descriptor, SCC from an ALU on descriptor data, a read after a
+  forward join or at a loop head that a path brings the select to, a load whose word 2 is joined after a select on
+  one path or on a loop back edge, and a select in the high word of a 64-bit ALU source (the same joins and loop
+  without the select translate);
 - still refused as before: s_cselect_b64, m0 and vcc_lo destinations, a raw descriptor word, a pointer or run-time
   register arm, and the vertex and pixel stages.
 Negative controls, each a mutated translator that must fail a named check:
 - zero-arm-dropped: the select keeps only its descnum arm, so the conversion with the selected stride translates;
 - load-check-removed: Stage.select_word finds nothing, so a load through a copied select translates;
-- alu-check-removed: Stage.refuse_select_source accepts everything, so an ALU copy into word 2 reaches the load.
+- alu-check-removed: Stage.refuse_select_source accepts everything, so an ALU copy into word 2 reaches the load;
+- join-check-removed: Stage.joined_word finds nothing, so a load after a join with a select on one path translates;
+- high-word-unchecked: refuse_select_source sees only the low word of each source, so s_or_b64 of a pair whose high
+  word holds the select translates.
 The dispatch mode runs case A with the dead select on D3D12 and compares all 320 words with case A's reference.
 """
 import struct
@@ -100,6 +105,11 @@ WORDS = {
     's_cbranch_scc1 1': struct.pack('<I', 0xbf850001),
     's_cbranch_scc1 3': struct.pack('<I', 0xbf850003),
     's_cbranch_scc1 65529': struct.pack('<I', 0xbf85fff9),  # back 7 dwords
+    's_cbranch_scc1 65528': struct.pack('<I', 0xbf85fff8),  # back 8 dwords
+    's_cbranch_scc1 2': struct.pack('<I', 0xbf850002),
+    's_cselect_b32 s14, 0, s21': sop2(CSEL, 14, ZERO, 21),
+    's_mov_b32 s14, s14': sop1(MOV, 14, 14),
+    's_or_b64 s[14:15], s[20:21], 0': sop2(0x11, 14, 20, ZERO),
     **{line: bytes.fromhex(C.SPLICE[line]) for line in C.RAW_CONVERSION},
 }
 for _text, _code in WORDS.items():
@@ -128,6 +138,12 @@ def check(what, ok, detail=''):
 
 def at(position, *lines):
     return C.WORDS_A[:position] + b''.join(WORDS[line] for line in lines) + C.WORDS_A[position:]
+
+
+def around_load(before, after):
+    """Case A with `before` spliced in front of its buffer load and `after` behind it."""
+    return (C.WORDS_A[:LOAD] + b''.join(WORDS[line] for line in before) + C.WORDS_A[LOAD:LOAD + 8]
+            + b''.join(WORDS[line] for line in after) + C.WORDS_A[LOAD + 8:])
 
 
 def translate(code):
@@ -222,6 +238,25 @@ def check_later_uses():
     assert 's_cbranch_scc1 label_0x%x' % head in [t for _, _, _, t in G.decode(code)], 'the back edge misses the head'
     refused('read at a loop head after a select on the back edge', 'numeric use of s21 holding joined at a branch target',
             code)
+    # A select that reaches a descriptor word through a join leaves that word joined. The access names its resource by
+    # word 0 only, so a joined word after it refuses (#2903 review, case 1). The same join with the loaded word on
+    # both paths keeps the word and translates.
+    split = (DESCNUM, 's_cmp_eq_u32 s5, 0', 's_cbranch_scc1 2', COMPARE)
+    refused('load after a join where one path selects into word 2', 'descriptor operand s[12:15]: s14 holds a word joined',
+            at(LOAD, *split, 's_cselect_b32 s14, 0, s21'))
+    accepted('the same join with the loaded word on both paths translates', at(LOAD, *split, 's_mov_b32 s14, s14'))
+    # The same through a loop back edge: the select into word 2 at the bottom reaches the load at the head.
+    tail = ('s_add_i32 s22, s22, 1', 's_cmp_lt_u32 s22, 3')
+    code = around_load(['s_mov_b32 s22, 0'], [DESCNUM, COMPARE, 's_cselect_b32 s14, 0, s21', *tail, 's_cbranch_scc1 65528'])
+    assert 's_cbranch_scc1 label_0x%x' % (LOAD + 4) in [t for _, _, _, t in G.decode(code)], 'the back edge misses the load'
+    refused('load at a loop head after a select into word 2 on the back edge',
+            'descriptor operand s[12:15]: s14 holds a word joined', code)
+    code = around_load(['s_mov_b32 s22, 0'], [DESCNUM, COMPARE, *tail, 's_cbranch_scc1 65529'])
+    assert 's_cbranch_scc1 label_0x%x' % (LOAD + 4) in [t for _, _, _, t in G.decode(code)], 'the back edge misses the load'
+    accepted('the same loop without the select translates', code)
+    # A select in the high word of a 64-bit source (#2903 review, case 2): scalar() names the low word only.
+    refused('select in the high word of a 64-bit ALU source', 's_or_b64 on a select of descriptor data',
+            at(LOAD, 's_lshr_b32 s20, s14, 2', *SELECTED, 's_or_b64 s[14:15], s[20:21], 0'))
 
 
 def check_still_refused():
@@ -264,11 +299,21 @@ def zero_arm_dropped(original):
     return select
 
 
+def low_words_only(original):
+    def refuse(self, base, srcs):  # the check before the #2903 review: the low register of each source only
+        return original(self, base, ['s%d' % G.reg_range(t)[1] if G.reg_range(t) and G.reg_range(t)[0] == 's' else t
+                                     for t in srcs])
+    return refuse
+
+
 MUTATIONS = {
     'zero-arm-dropped': ('scalar_select', zero_arm_dropped, 'raw conversion with the selected stride'),
     'load-check-removed': ('select_word', lambda original: lambda self, tok: None, 'load through a select copied into s14'),
-    'alu-check-removed': ('refuse_select_source', lambda original: lambda self, base, syms: None,
+    'alu-check-removed': ('refuse_select_source', lambda original: lambda self, base, srcs: None,
                           'an ALU copy into word 2 before the load'),
+    'join-check-removed': ('joined_word', lambda original: lambda self, tok: None,
+                           'load after a join where one path selects into word 2'),
+    'high-word-unchecked': ('refuse_select_source', low_words_only, 'select in the high word of a 64-bit ALU source'),
 }
 
 
