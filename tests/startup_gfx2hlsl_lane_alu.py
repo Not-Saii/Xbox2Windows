@@ -79,7 +79,11 @@ def order(word):
 
 
 def actual(run):
-    found = re.search(r'actual=([0-9a-f,]+)', run.stderr)
+    """The readback the renderer reports on a mismatch, or None if the run failed any other way."""
+    # A mismatch exits 1 even when the debug layer also logged errors; those must not be tolerated away.
+    if re.search(r'debug_errors=[1-9]', run.stdout):
+        return None
+    found = re.search(r'startup_flat_param mismatch expected=[0-9a-f,]+ actual=([0-9a-f,]+)', run.stderr)
     return [int(w, 16) for w in found.group(1).split(',')] if found else None
 
 
