@@ -114,6 +114,37 @@ int main(int argc, char** argv)
         return invoke(device.Get(), 14, &heap, &__uuidof(ID3D12DescriptorHeap), reinterpret_cast<void**>(out));
     });
 
+    // Slot 9, command allocator: the shared creation path (create_slot) wraps what desktop returned.
+    check("Device::CreateCommandAllocator", [&](IUnknown** out) {
+        return invoke(device.Get(), 9, D3D12_COMMAND_LIST_TYPE_DIRECT, &__uuidof(ID3D12CommandAllocator),
+                      reinterpret_cast<void**>(out));
+    });
+
+    // Slot 73, command list on that allocator: a desktop list is created before the 64 KiB list wrapper.
+    ComPtr<IUnknown> allocator;
+    if (FAILED(invoke(device.Get(), 9, D3D12_COMMAND_LIST_TYPE_DIRECT, &__uuidof(ID3D12CommandAllocator),
+                      reinterpret_cast<void**>(allocator.GetAddressOf()))))
+        return 3;
+    const std::array<UINT, 4> list_desc{D3D12_COMMAND_LIST_TYPE_DIRECT};
+    check("Device::slot73 command list", [&](IUnknown** out) {
+        return invoke(device.Get(), 73, static_cast<const void*>(list_desc.data()), static_cast<void*>(allocator.Get()),
+                      static_cast<void*>(nullptr), &__uuidof(ID3D12GraphicsCommandList), reinterpret_cast<void**>(out));
+    });
+
+    // Slot 127, committed resource: a desktop buffer is created before the wrapper.
+    const D3D12_HEAP_PROPERTIES props{D3D12_HEAP_TYPE_DEFAULT};
+    D3D12_RESOURCE_DESC buffer{};
+    buffer.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    buffer.Width = 65536;
+    buffer.Height = buffer.DepthOrArraySize = buffer.MipLevels = 1;
+    buffer.SampleDesc.Count = 1;
+    buffer.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    check("Device::slot127 committed resource", [&](IUnknown** out) {
+        return invoke(device.Get(), 127, &props, 0u, &buffer, 0u, static_cast<const D3D12_CLEAR_VALUE*>(nullptr),
+                      static_cast<void*>(nullptr), 0u, static_cast<const void*>(nullptr), &__uuidof(ID3D12Resource),
+                      reinterpret_cast<void**>(out));
+    });
+
     if (failures) {
         std::printf("FAIL: %d check(s)\n", failures);
         return 1;

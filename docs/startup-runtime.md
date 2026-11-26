@@ -1586,7 +1586,7 @@ through a null pointer inside the stand-in. This was seen at the job commit limi
 slot 55 derived-pipeline placeholder. Whether the title handles the error is not established.
 
 `startup_wrap_allocation_warp` makes the next wrapper allocation fail through the fixture-only export
-`x2w_d3d12_fail_wraps`. Device creation and slots 8, 14, 16 and 55 must return `E_OUTOFMEMORY` with a null
+`x2w_d3d12_fail_wraps`. Device creation and slots 8, 9, 14, 16, 55, 73 and 127 must return `E_OUTOFMEMORY` with a null
 output, then succeed. `startup_wrap_allocation_control_warp` never arms the failure and must report it.
 
 ```powershell
