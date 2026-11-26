@@ -431,6 +431,12 @@ set_target_properties(d3d12_xs_shim PROPERTIES OUTPUT_NAME d3d12_xs)
 target_include_directories(d3d12_xs_shim PRIVATE src)
 target_compile_features(d3d12_xs_shim PRIVATE cxx_std_17)
 target_link_libraries(d3d12_xs_shim PRIVATE d3d12)
+# X2W_NATIVE_SHADERS: the stand-in translates slot 67 compute requests in-process
+# (src/startup_stubs/d3d12_compute_dispatch.inl). Both use the static CRT.
+if(TARGET x2w_shader_compiler)
+    target_link_libraries(d3d12_xs_shim PRIVATE x2w_shader_compiler)
+    target_compile_definitions(d3d12_xs_shim PRIVATE X2W_NATIVE_SHADERS)
+endif()
 # The creation-IID gate and refusal text of D3D12XboxCreateDevice (src/d3d12x_device_slots.h),
 # without a device. The mutated run is the negative control.
 add_executable(d3d12x_device_slots_check tests/d3d12x_device_slots_check.cpp src/d3d12x_device_slots.cpp)
