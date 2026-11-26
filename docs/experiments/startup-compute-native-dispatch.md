@@ -92,5 +92,7 @@ ctest --preset dev --no-tests=error -V -R '^(startup_compute_dispatch(_.*)?|star
 - The result is not published, so each process translates a key again. The compiler's DXIL cache under
   `<shader cache>\native` is reused.
 - The GPU-check package ships `offscreen_check.exe`, which compiles the stand-in source without
-  `X2W_NATIVE_SHADERS`. That variant builds and `offscreen_warp` passes. The package script (`tools/package-gpu-check.ps1`) and its WARP
-  smoke test were not run.
+  `X2W_NATIVE_SHADERS`. That variant builds and `offscreen_warp` passes. The package script (`tools/package-gpu-check.ps1`) was run at
+  `89a75318` (the same code): the extracted package passes its WARP run on the Microsoft Basic Render Driver
+  10.0.26100.9818 with 11 tests passing and 68 of 68 recorded shader cases. `bvh_wave64_warp` reports a capability
+  skip there (no 64-lane waves).
