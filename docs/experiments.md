@@ -49,6 +49,23 @@ cmake --build --preset dev --target compile_dxil offscreen_check
 ctest --preset dev --no-tests=error -V -R '^native_graphics_wqm_hardware$'
 ```
 
+### Per-vertex VCC across a vertex-stage join
+
+A source-built vertex stage branches on a root word that the harness supplies
+at draw time. Each arm runs its own `SV_VertexID` compare into VCC and writes
+its own constant. After the join one CNDMASK selects that constant or 0.5 per
+vertex. A desktop pixel stage reads the three vertex values with
+`GetAttributeAtVertex`, so every pixel reports them without interpolation, and
+the readback is compared with a per-vertex CPU model. Two controls redraw a
+changed program against the unchanged reference: one arm loses its compare, or
+a uniform compare overwrites the joined mask. Both must differ at all 8 pixels.
+Branches that need a whole-wave VCC vote are outside this fixture.
+
+```powershell
+cmake --build --preset dev --target compile_dxil offscreen_check
+ctest --preset dev --no-tests=error -V -R '^native_graphics_vertex_vcc_join_(warp|hardware)$'
+```
+
 ## Desktop culling and front-face winding
 
 `raster_winding_warp` and `raster_winding_hardware` draw two mirrored triangles
