@@ -1,4 +1,4 @@
-"""Draw a source-built guest VS whose per-vertex VCC crosses a two-arm join."""
+"""Draw source-built guest VS programs whose per-vertex VCC crosses a two-arm join."""
 import re
 import struct
 import subprocess
@@ -12,6 +12,7 @@ from native_scalar_lds_check import sop1, vmove
 NOP = 0xbf800000
 ARM_B_COMPARE = 15
 JOIN = 17
+LANE_JOIN = 17
 
 
 def cndmask(dst, taken, other):
@@ -33,6 +34,22 @@ def program(arm_b):
            vmove(5, 240), cndmask(5, 4, 261),   # after the join: VCC ? v4 : 0.5
            0xf80000cf, 0x07030201, 0xf8000a0f, 0x05050405, 0xbf810000]
     assert seq[ARM_B_COMPARE] == 0x7d0a0082 and seq[JOIN] == vmove(5, 240)
+    return seq
+
+
+def lane_program():
+    # The compare itself splits the wave: vertex 1 runs THEN, the others ELSE.
+    # VCC is written once, before the region, and read after EXEC is restored.
+    seq = program(False)[:7]
+    # A masked write keeps the previous v4 on the other lanes.
+    seq += [vmove(4, 242),
+            0x7d040081, 0xbe88246a, 0xbf880002,     # VCC = id == 1; save EXEC; skip THEN
+            vmove(4, 244), NOP,                      # THEN: v4 = 2
+            0x8afe7e08, 0xbf880001, vmove(4, 246),   # ELSE: v4 = 4
+            0xbefe0408,
+            0x101008f3, cndmask(5, 4, 264),          # v8 = -v4; VCC ? v4 : v8
+            0xf80000cf, 0x07030201, 0xf8000a0f, 0x05050405, 0xbf810000]
+    assert seq[LANE_JOIN] == 0x101008f3
     return seq
 
 
@@ -58,10 +75,10 @@ def main(cli, raster, sdk, backend):
                           "GetAttributeAtVertex(v,2).x,GetAttributeAtVertex(v,0).y);}")
         subprocess.run([Path(sdk)/"dxc.exe", "-T", "ps_6_6", "-Fo", ps, source], check=True)
 
-        def draw(seq, arm_b):
+        def draw(seq, words):
             source.write_bytes(container(seq))
             subprocess.run([cli, sdk, work/"cache", "gfx1013-container-vs", source, vs], check=True)
-            expected.write_bytes(struct.pack("<4f", *reference(arm_b))*8)
+            expected.write_bytes(struct.pack("<4f", *words)*8)
             result = subprocess.run([raster, backend, "--startup-pixel-words", vs, ps, "4", "2", expected],
                                     capture_output=True, text=True)
             if result.returncode == 77:
@@ -74,7 +91,7 @@ def main(cli, raster, sdk, backend):
             return result.stderr.splitlines()[0]
 
         for arm_b in (False, True):
-            result = draw(program(arm_b), arm_b)
+            result = draw(program(arm_b), reference(arm_b))
             assert result.returncode == 0, (result.stdout, result.stderr)
             ir = subprocess.check_output([Path(sdk)/"dxc.exe", "-dumpbin", vs], text=True)
             # Each arm supplies its own compare to the mask the select reads.
@@ -85,18 +102,26 @@ def main(cli, raster, sdk, backend):
             print(*(line for line in result.stdout.splitlines()
                     if line.startswith(("backend=", "adapter=", "driver=", "debug_"))), sep="\n")
             print(f"arm {'AB'[arm_b]}: vertices 0..2 and arm value matched {reference(arm_b)}")
-        # Control 1: arm B no longer contributes its own compare. The join
+        # Vertex 0 supplies the fourth word, so it is the ELSE value.
+        lane = [-4.0, 2.0, -4.0, 4.0]
+        result = draw(lane_program(), lane)
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        print(f"per-vertex arms: THEN on vertex 1, ELSE on vertices 0 and 2 matched {lane}")
+        uniform = lane_program()
+        uniform.insert(LANE_JOIN, 0x7d040100)
+        print("uniform mask after the per-vertex arms:", differs(draw(uniform, lane)))
+        # Control: arm B no longer contributes its own compare. The join
         # then receives the stale id == 2 mask on that edge only.
         dropped = program(True)
         dropped[ARM_B_COMPARE] = NOP
-        print("dropped arm B contribution:", differs(draw(dropped, True)))
+        print("dropped arm B contribution:", differs(draw(dropped, reference(True))))
         dropped[8] = 0
-        assert draw(dropped, False).returncode == 0
-        # Control 2: a uniform v0 == v0 replaces the joined mask.
+        assert draw(dropped, reference(False)).returncode == 0
+        # Control: a uniform v0 == v0 replaces the joined mask.
         for arm_b in (False, True):
             uniform = program(arm_b)
             uniform.insert(JOIN, 0x7d040100)
-            print(f"uniform mask after the join, arm {'AB'[arm_b]}:", differs(draw(uniform, arm_b)))
+            print(f"uniform mask after the join, arm {'AB'[arm_b]}:", differs(draw(uniform, reference(arm_b))))
 
 
 if __name__ == "__main__":
