@@ -20,6 +20,7 @@ A family is a dict with:
   accepted:  assembly lines that must translate (one instruction, no pipeline)
   pipeline:  optional keyword arguments of the Pipeline built for the fixture (a selected contract)
   ulps:      optional mnemonic -> how many binary32 ulps a lane may read off its reference (default 0, exact)
+             a nonzero bound measures distance on the number line, so it accepts -0.0 for +0.0 and back
 Every reference is written from the ISA description with plain integer arithmetic, not from the lowering.
 """
 import re
