@@ -1586,8 +1586,11 @@ through a null pointer inside the stand-in. This was seen at the job commit limi
 slot 55 derived-pipeline placeholder. Whether the title handles the error is not established.
 
 `startup_wrap_allocation_warp` makes the next wrapper allocation fail through the fixture-only export
-`x2w_d3d12_fail_wraps`. Device creation and slots 8, 9, 14, 16, 55, 73 and 127 must return `E_OUTOFMEMORY` with a null
-output, then succeed. `startup_wrap_allocation_control_warp` never arms the failure and must report it.
+`x2w_d3d12_fail_wraps`. Device creation and slots 8, 9, 14, 16, 55, 73 and 127 must return
+`E_OUTOFMEMORY` with a null output, then succeed. After a failed attempt to create a second device,
+`GetDevice` on a live queue must still return the original device. The
+`startup_wrap_allocation_control_warp` test leaves the failure injection disabled and checks that
+the fixture detects the unexpected success.
 
 ```powershell
 cmake --build --preset dev --target startup_wrap_allocation

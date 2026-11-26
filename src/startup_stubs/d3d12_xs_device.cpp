@@ -6456,10 +6456,14 @@ void x2w_startup::attach_device(ID3D12Device* device, void** wrapped)
 {
     static const bool ready = (build_tables(), true);
     (void)ready;
-    the_device = wrap(device, device_kind);
-    if (!the_device) device->Release();  // the reference this call owns; *wrapped is null
-    else removal_device = device;
-    *wrapped = the_device;
+    Wrapper* const candidate = wrap(device, device_kind);
+    *wrapped = candidate;
+    if (!candidate) {
+        device->Release();
+        return;
+    }
+    the_device = candidate;
+    removal_device = device;
 }
 
 HRESULT x2w_startup::resolve_placed_build(void* guest_device, UINT64 dest, UINT64 scratch,
@@ -6542,12 +6546,8 @@ HRESULT x2w_d3d12_permissive_create_device(IUnknown* adapter, const void* parame
     log("x2w-d3d12 D3D12XboxCreateDevice adapter=%p params=[%s] riid=%s -> 0x%08lx build=%s", static_cast<void*>(adapter),
         block, text, static_cast<unsigned long>(hr), x2w_build_rev);
     if (FAILED(hr)) return hr;
-    if (debug) device->QueryInterface(IID_PPV_ARGS(&info_queue));
     x2w_startup::attach_device(device, out);
-    if (!*out) {
-        if (info_queue) info_queue->Release();
-        info_queue = nullptr;
-        return E_OUTOFMEMORY;
-    }
+    if (!*out) return E_OUTOFMEMORY;
+    if (debug) device->QueryInterface(IID_PPV_ARGS(&info_queue));
     return S_OK;
 }

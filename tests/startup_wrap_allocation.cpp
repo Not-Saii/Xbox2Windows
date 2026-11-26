@@ -96,6 +96,30 @@ int main(int argc, char** argv)
         return invoke(device.Get(), 8, &queue, &__uuidof(ID3D12CommandQueue), reinterpret_cast<void**>(out));
     });
 
+    // A failed device creation must leave the previously published device visible to its children.
+    if (!control) {
+        ComPtr<ID3D12CommandQueue> existing_queue;
+        HRESULT hr = invoke(device.Get(), 8, &queue, &__uuidof(ID3D12CommandQueue),
+                            reinterpret_cast<void**>(existing_queue.GetAddressOf()));
+        if (FAILED(hr) || !existing_queue) return 3;
+
+        ComPtr<IUnknown> second_device;
+        arm();
+        hr = D3D12XboxCreateDevice(adapter.Get(), parameters.data(), __uuidof(ID3D12Device),
+                                  reinterpret_cast<void**>(second_device.GetAddressOf()));
+        x2w_d3d12_fail_wraps(0);
+        if (hr != E_OUTOFMEMORY || second_device) {
+            std::puts("FAIL: second device allocation did not return E_OUTOFMEMORY and a null output");
+            ++failures;
+        }
+        ComPtr<IUnknown> parent;
+        hr = existing_queue->GetDevice(__uuidof(ID3D12Device), reinterpret_cast<void**>(parent.GetAddressOf()));
+        if (FAILED(hr) || parent.Get() != device.Get()) {
+            std::puts("FAIL: failed device creation changed the existing queue's device");
+            ++failures;
+        }
+    }
+
     // Slot 16, root signature: a desktop root signature is created before the wrapper.
     ComPtr<ID3DBlob> blob;
     const D3D12_ROOT_SIGNATURE_DESC empty{};
