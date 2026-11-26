@@ -920,7 +920,8 @@ translation is tried once per key and before a published `<key>.txt`. It covers 
 pipelines still need a published translation.
 
 Check with `ctest --preset dev -R '^startup_compute_dispatch_native_(warp|hardware)$' -V`
-([`tests/startup_compute_dispatch_native_check.py`](../tests/startup_compute_dispatch_native_check.py)).
+([`tests/startup_compute_dispatch_native_check.py`](../tests/startup_compute_dispatch_native_check.py);
+[route, controls and results](experiments/startup-compute-native-dispatch.md)).
 
 ### Compute pipeline requests
 
