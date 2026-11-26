@@ -1403,6 +1403,18 @@ foreach(backend IN ITEMS warp hardware)
     endforeach()
 endforeach()
 
+# #2653: a failed wrapper allocation returns E_OUTOFMEMORY with a null output from device creation and slots 8, 14, 16
+# and 55. `control` never arms the failure, so the fixture must report it.
+add_executable(startup_wrap_allocation tests/startup_wrap_allocation.cpp)
+target_compile_features(startup_wrap_allocation PRIVATE cxx_std_17)
+target_link_libraries(startup_wrap_allocation PRIVATE d3d12_xs_shim d3d12 dxgi)
+add_test(NAME startup_wrap_allocation_warp COMMAND startup_wrap_allocation)
+add_test(NAME startup_wrap_allocation_control_warp COMMAND startup_wrap_allocation control)
+set_tests_properties(startup_wrap_allocation_warp startup_wrap_allocation_control_warp PROPERTIES
+    TIMEOUT 60 SKIP_RETURN_CODE 77 ENVIRONMENT "X2W_D3D12_PERMISSIVE=1;X2W_D3D12_DEBUG=0")
+set_tests_properties(startup_wrap_allocation_control_warp PROPERTIES
+    PASS_REGULAR_EXPRESSION "FAIL: Device::slot55 derived pipeline with the wrapper allocation failing")
+
 add_executable(startup_resource_retire_title tests/startup_resource_retire_title.cpp)
 target_include_directories(startup_resource_retire_title PRIVATE src)
 target_compile_features(startup_resource_retire_title PRIVATE cxx_std_17)

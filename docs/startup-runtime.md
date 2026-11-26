@@ -1577,6 +1577,23 @@ cmake --build --preset dev --target startup_view_census
 ctest --preset dev --no-tests=error -R "^startup_view_census" -V
 ```
 
+## Wrapper allocation failure
+
+Every object the D3D12 stand-in returns is a wrapper allocated in `wrap()`. When that allocation (or its
+registration) fails, the creating call releases the desktop object it made and returns `E_OUTOFMEMORY` with
+a null output ([#2653](https://github.com/R0Y00/Xbox2Windows/issues/2653)). Before, the failure was a write
+through a null pointer inside the stand-in. This was seen at the job commit limit in a startup run, at the
+slot 55 derived-pipeline placeholder. Whether the title handles the error is not established.
+
+`startup_wrap_allocation_warp` makes the next wrapper allocation fail through the fixture-only export
+`x2w_d3d12_fail_wraps`. Device creation and slots 8, 14, 16 and 55 must return `E_OUTOFMEMORY` with a null
+output, then succeed. `startup_wrap_allocation_control_warp` never arms the failure and must report it.
+
+```powershell
+cmake --build --preset dev --target startup_wrap_allocation
+ctest --preset dev --no-tests=error -R "^startup_wrap_allocation" -V
+```
+
 ## Input script
 
 `X2W_INPUT_SCRIPT` (`run.ps1 -InputScript`) drives the virtual gamepad of the `GameInput.dll`
