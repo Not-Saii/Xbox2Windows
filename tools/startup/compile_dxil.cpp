@@ -1,5 +1,6 @@
 #include "shader_dxil_compiler.h"
 #include "direct_compute_cache.h"
+#include "graphics_request_job.h"
 #include "gfx1013_pixel.h"
 #include "gfx1013_sampled_pixel.h"
 #include "gfx1013_vertex_id.h"
@@ -26,23 +27,8 @@ static double elapsed_ms(Clock::time_point since) {
 
 namespace fs = std::filesystem;
 
-static void publish_atomic(const fs::path& destination, const void* data, size_t size) {
-    static std::atomic<unsigned long long> serial{};
-    auto temp=destination;
-    temp += L"." + std::to_wstring(GetCurrentProcessId()) + L"." + std::to_wstring(serial++) + L".tmp";
-    try {
-        std::ofstream file(temp,std::ios::binary);
-        file.exceptions(std::ios::badbit | std::ios::failbit);
-        if (size) file.write(static_cast<const char*>(data),size);
-        file.close();
-        if(!MoveFileExW(temp.c_str(),destination.c_str(),MOVEFILE_REPLACE_EXISTING))
-            throw std::runtime_error("could not publish output");
-    } catch(...) {
-        std::error_code ignored;
-        fs::remove(temp,ignored);
-        throw;
-    }
-}
+using x2w::compile_to_dxil;
+using x2w::publish_atomic;
 
 // The view metadata captured with a compute request (req_<key>.views), read before the program is translated. Absent:
 // the request has no captured selection and a GPU-selected heap read is refused. Present: every refusal below happens
@@ -72,16 +58,6 @@ static CapturedViews read_captured_views(const fs::path& request_path) {
                                  " is not raw_buffer; only raw buffer heap reads are translated");
     views.contract = x2w::HeapViewContract::raw_buffer;
     return views;
-}
-
-static std::vector<unsigned char> compile_to_dxil(x2w::ShaderDxilCompiler& compiler, const std::string& source,
-                                                  const std::wstring& profile, const fs::path& cache, bool direct,
-                                                  std::ostream& report) {
-    auto start=Clock::now();
-    auto output=compiler.compile(source,profile,cache,direct?x2w::ShaderSourceFormat::dxil_ir:x2w::ShaderSourceFormat::hlsl);
-    report << (output.cache_hit?"cache_hit_ms=":"cold_compile_and_publish_ms=")
-              << elapsed_ms(start) << " bytes=" << output.dxil.size() << '\n';
-    return std::move(output.dxil);
 }
 
 static void compile_source(x2w::ShaderDxilCompiler& compiler,const std::string& source,const std::wstring& profile,
@@ -332,31 +308,8 @@ int wmain(int argc, wchar_t** argv) {
                 if (manifest) publish_atomic(manifest_path, manifest->data(), manifest->size());
                 return;
             }
-            const fs::path manifest_path = fs::path(stems[i]) += L".txt";
-            const fs::path psdep_path = fs::path(stems[i]) += L".psdep";
-            std::error_code ignored;
-            fs::remove(manifest_path, ignored);
-            auto input = x2w::read_graphics_request(inputs[i]);
-            bool hit = false;
-            auto pair = x2w::prepare_direct_graphics(input.a, input.b, argv[2], hit, input.root, input.input_layout, input.pixel_entry);
-            report << "graphics_pair frontend_cache_hit=" << hit << '\n';
-            auto manifest = rectangles ? std::nullopt : x2w::format_graphics_runtime_manifest(pair);
-            std::vector<unsigned char> gs_dxil;
-            if (rectangles) {
-                auto ir=x2w::native_rectangle_geometry(pair.vertex.outputs,pair.pixel.inputs);
-                gs_dxil = compile_to_dxil(compiler, ir, L"gs_6_6", argv[2], true, report);
-            }
-            auto vs_dxil = compile_to_dxil(compiler, pair.vertex.dxil_ir, L"vs_6_6", argv[2], true, report);
-            auto ps_dxil = compile_to_dxil(compiler, pair.pixel.dxil_ir, L"ps_6_6", argv[2], true, report);
-            if (rectangles)
-                publish_atomic(fs::path(stems[i]) += L".gs.cso", gs_dxil.data(), gs_dxil.size());
-            publish_atomic(outputs[i], vs_dxil.data(), vs_dxil.size());
-            publish_atomic(fs::path(stems[i]) += L".ps.cso", ps_dxil.data(), ps_dxil.size());
-            if (manifest) {
-                if (!input.pixel_input_description.empty())
-                    publish_atomic(psdep_path, input.pixel_input_description.data(), input.pixel_input_description.size());
-                publish_atomic(manifest_path, manifest->data(), manifest->size());
-            }
+            x2w::compile_graphics_request(compiler, inputs[i], stems[i], argv[2],
+                rectangles ? x2w::GraphicsRequestMode::rectangles : x2w::GraphicsRequestMode::batch, report);
         };
         if(jobs==1 && !directory) {
             x2w::ShaderDxilCompiler compiler(argv[1]);

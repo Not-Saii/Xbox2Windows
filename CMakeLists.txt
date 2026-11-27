@@ -9,7 +9,8 @@ if(WIN32)
     if(X2W_HAVE_DXCAPI)
         add_library(x2w_shader_compiler STATIC src/gfx1013_pixel.cpp src/gfx1013_compute_clear.cpp
             src/shader_compute_request.cpp src/guest_shader_container.cpp src/gfx1013_isa.cpp src/direct_compute_cache.cpp src/gfx1013_compute_native.cpp src/native_compute_pipeline.cpp
-            src/gfx1013_compute_ir.cpp src/gfx1013_sampled_pixel.cpp src/gfx1013_vertex_id.cpp src/gfx1013_rect_geometry.cpp src/shader_dxil_compiler.cpp)
+            src/gfx1013_compute_ir.cpp src/gfx1013_sampled_pixel.cpp src/gfx1013_vertex_id.cpp src/gfx1013_rect_geometry.cpp src/shader_dxil_compiler.cpp
+            src/graphics_request_job.cpp)
         set(native_shader_revision "")
         foreach(source gfx1013_compute_native.cpp gfx1013_compute_native.h gfx1013_compute_opcodes.inl gfx1013_graphics_wqm.inl
                 gfx1013_isa_tables.inl gfx1013_isa.cpp gfx1013_isa.h gfx1013_compute_alu.inl gfx1013_direct_compute.inl gfx1013_compute_ir.cpp gfx1013_compute_ir.h

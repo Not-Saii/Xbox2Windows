@@ -138,6 +138,7 @@ struct Translation {
     struct Ud { int kind, a, b; };
     int state = 0;                           // 1 ready, 2 unavailable
     ULONGLONG retry_manifest_at = 0;         // Only an absent manifest can become ready on a later draw.
+    bool native_tried = false;               // compile_pair_in_process ran for this key
     std::vector<Srv> srvs;
     std::vector<PixelUav> uavs;              // manifest 'uav N tex2d table P O' (#1996 F): u0.. after the SRVs
     std::vector<Ud> uds;
@@ -870,6 +871,51 @@ u64 known_pipeline_key(Wrapper* pipeline)
     return key;
 }
 
+// X2W_NATIVE_SHADERS=<directory of dxcompiler.dll and dxil.dll>: the first draw of a pipeline whose <key>.txt is
+// absent compiles the pair in this process with the C++ compiler, from the req_<key>.* files cached_translation
+// published, with the job compile_dxil runs on a request directory (src/graphics_request_job.cpp). It publishes
+// <key>.vs.cso, <key>.ps.cso and then <key>.txt, and load_translation reads them as it reads any published entry, so
+// a later process finds the entry and compiles nothing. A <key>.txt published since pipeline creation is loaded
+// instead and nothing of it is removed or replaced. A refusal is logged with its stage and leaves no <key>.txt: the
+// key stays with the published translations. Tried once per key, on the pipeline's own target formats only (an RTV
+// variant still needs a published translation). draw_lock held.
+void compile_pair_in_process(Translation& tr)
+{
+    tr.native_tried = true;
+#ifdef X2W_NATIVE_SHADERS
+    wchar_t sdk[MAX_PATH], marker[MAX_PATH], stem[MAX_PATH];
+    const DWORD length = GetEnvironmentVariableW(L"X2W_NATIVE_SHADERS", sdk, MAX_PATH);
+    if (!length || length >= MAX_PATH || !cache_path(marker, L"req_", tr.key, L".a") || !cache_path(stem, L"", tr.key, L"")) return;
+    if (tr.state != 1 && tr.retry_manifest_at) load_translation(tr);  // published since the pipeline was created?
+    if (tr.state == 1) {
+        static LONG logged;
+        if (first_calls(logged, 16)) log("x2w-draw pipeline %016llx: cache entry loaded, no in-process compile", tr.key);
+        return;
+    }
+    if (!tr.retry_manifest_at) return;  // a published <key>.txt that was rejected is not replaced
+    try {
+        // Never released: a static destructor would release DXC after its module may have detached.
+        static x2w::ShaderDxilCompiler* const compiler =
+            new x2w::ShaderDxilCompiler(x2w::ShaderDxilCompiler::runtime_worker(sdk));
+        std::ostringstream report;
+        std::string manifest = x2w::compile_graphics_request(*compiler, marker, stem,
+            std::filesystem::path(marker).parent_path() / L"native", x2w::GraphicsRequestMode::runtime, report);
+        if (!manifest.empty()) manifest.pop_back();
+        std::replace(manifest.begin(), manifest.end(), '\n', ';');
+        log("x2w-draw pipeline %016llx compiled in-process: %s", tr.key, manifest.c_str());
+        load_translation(tr);
+        if (tr.state != 1) log("x2w-draw pipeline %016llx: the in-process cache entry was not loaded", tr.key);
+    } catch (const x2w::GraphicsRequestRefusal& refusal) {
+        static LONG logged;
+        if (first_calls(logged, 16))
+            log("x2w-draw pipeline %016llx not compiled in-process (%s stage): %s", tr.key, refusal.stage, refusal.what());
+    } catch (const std::exception& error) {  // the compiler could not be loaded from the directory
+        static LONG logged;
+        if (first_calls(logged, 4)) log("x2w-draw pipeline %016llx not compiled in-process: %s", tr.key, error.what());
+    }
+#endif
+}
+
 bool needs_rtv_variant(DXGI_FORMAT format)
 {
     switch (format) {
@@ -896,6 +942,7 @@ Translation* translation_for_targets(Translation* base, const Pass& pass)
 {
     if (!base) return nullptr;
     if (std::none_of(pass.target_formats, pass.target_formats + pass.target_count, needs_rtv_variant)) {
+        if (!base->native_tried) compile_pair_in_process(*base);
         if (base->retry_manifest_at && GetTickCount64() >= base->retry_manifest_at)
             load_translation(*base);
         return base;

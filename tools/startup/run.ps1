@@ -27,7 +27,7 @@ param(
     [switch]$GpuMirror,                        # map CPU-view pages into the paired GPU-view reservation
     [switch]$HostCpu,                          # rewrite instructions the host processor lacks (X2W_HOST_CPU)
     [switch]$Translate,                        # with -Render: translate new shader requests during the run (gfx2hlsl.py --watch)
-    [string]$NativeShaders = "",               # with -Render: the directory of dxcompiler.dll and dxil.dll; compute requests are translated in the stand-in (X2W_NATIVE_SHADERS)
+    [string]$NativeShaders = "",               # with -Render: the directory of dxcompiler.dll and dxil.dll; compute requests and first-drawn graphics pairs are translated in the stand-in (X2W_NATIVE_SHADERS)
     [switch]$StartupBelow40,                   # place the 0x283 large-page startup blocks below 2^40 (X2W_XMEM_STARTUP_BELOW_40)
     [switch]$LazyMemory,                       # commit physical pages and large startup blocks on first touch (X2W_XMEM_LAZY_COMMIT, X2W_XMEM_LAZY_STARTUP, X2W_XMEM_SHARED_VIEWS)
     [switch]$TraceCalls,                       # also break on runtime and movie-player calls (--trace-calls 1; slows the process)

@@ -680,7 +680,9 @@ int main(int argc, char** argv)
     const DWORD length = GetEnvironmentVariableW(L"X2W_TEST_PUBLISH_MANIFEST", manifest, MAX_PATH);
     if (length && length < MAX_PATH) {
         const std::string first = std::string(argv[5]) + ".first";
-        if (const int rc = check_stream_draw(adapter.Get(), device, pso, first.c_str(), nullptr, format)) return rc;
+        // X2W_TEST_PUBLISH_BEFORE_DRAW: the manifest appears after pipeline creation and before the first draw.
+        if (!GetEnvironmentVariableW(L"X2W_TEST_PUBLISH_BEFORE_DRAW", nullptr, 0))
+            if (const int rc = check_stream_draw(adapter.Get(), device, pso, first.c_str(), nullptr, format)) return rc;
         if (!MoveFileW((std::wstring(manifest) + L".pending").c_str(), manifest)) return 61;
         Sleep(1100);
     }

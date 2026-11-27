@@ -558,6 +558,8 @@ int check_stream_draw(IDXGIAdapter* adapter, void* guest, void* pso, const char*
     } else if (GetEnvironmentVariableW(L"X2W_TEST_FRAME_COPY", nullptr, 0)) {
         extern int draw_frame_copies(ID3D12Device*, void*, void*, UINT, UINT);
         if (const int result = draw_frame_copies(desktop.Get(), guest, list, width, height)) return result;
+    } else if (GetEnvironmentVariableW(L"X2W_TEST_NO_DRAW", nullptr, 0)) {
+        // The skipped-draw control (startup_draw_native_check.py): the cleared target is submitted without a draw.
     } else {
         if (bc7 && bc7->packed) invoke(list, 52, binding.rtv, arg(packed_clear));  // render into the texture, then sample it
         if (bc7) invoke(list, 36, 0, binding.table);
