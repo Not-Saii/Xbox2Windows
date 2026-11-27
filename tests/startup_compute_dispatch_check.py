@@ -13,7 +13,8 @@ memory; the output words are read from that memory after the queue's fence. The 
 2. after gfx2hlsl.py --pending with DXC: all 320 words equal the case's expectation;
 3. dispatch-none (no Dispatch recorded): every word keeps the sentinel;
 4. dispatch-swapped (the two descriptors exchanged, so the output names the buffer without unordered access):
-   refused with one logged reason, every word keeps the sentinel and the input is unchanged;
+   refused with "an output buffer has no unordered access", every word keeps the sentinel and the input is
+   unchanged;
 5. dispatch-same-root (the same compute root set again after the constants): all 320 words still match;
 6. five more refusals, each with its one logged reason and an untouched output: dispatch-missing-word (no slot 37
    call), dispatch-root-changed (another compute root and back after the constants), dispatch-reset (list closed
@@ -120,9 +121,9 @@ def main(consumer, dxc, adapter):
         refused = lines(result, 'refused: ')
         census = lines(result, 'x2w-render compute census')
         assert len(census) == 3 and census[1].endswith(
-            'reason "an output is not an aliased placed buffer range with unordered access": 1 keys, 1 dispatches') \
+            'reason "an output buffer has no unordered access": 1 keys, 1 dispatches') \
             and '[00000000 00000000 ' not in census[2], census
-        assert len(refused) == 1 and 'an output is not an aliased placed buffer range with unordered access' in refused[0], \
+        assert len(refused) == 1 and 'an output buffer has no unordered access' in refused[0], \
             result.stderr[-3000:]
         got, result = dispatch(directory, consumer, env, 'dispatch-same-root')
         assert got == expected and not lines(result, 'refused'), 'setting the same compute root again lost the constants'

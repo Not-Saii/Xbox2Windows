@@ -549,16 +549,25 @@ const char* record_translated_dispatch(Wrapper* self, const TranslatedDispatch& 
         }
         // An output is written by the GPU: only a placed buffer that aliases the title's memory shows the result
         // to the title. shortcut: view tokens and copied placements are refused, add them with their first user.
+        // Each refused condition has its own reason.
         const u64 address = words[0] | (u64{words[1] & 0xffff} << 32);
         const UINT stride = (words[1] >> 16) & 0x3fff;
         const u64 bytes = u64{stride ? stride : 1} * words[2];
-        const auto placed = words[0] == view_token_magic || !bytes || bytes % 4 || bytes > (16u << 20)
-            ? PlacedVertexView{} : placed_buffer_range(self->own().list_device, address, bytes);
+        const bool sized = words[0] != view_token_magic && bytes && bytes % 4 == 0 && bytes <= (16u << 20);
+        const auto placed = sized ? placed_buffer_range(self->own().list_device, address, bytes) : PlacedVertexView{};
         const ResourceInfo* info = placed.alias ? resource_info(placed.owner) : nullptr;
         const u64 offset = placed.alias ? address - reinterpret_cast<u64>(placed.owner->own().title_memory) : 0;
-        if (!info || info->initial_state != D3D12_RESOURCE_STATE_COMMON || offset % D3D12_RAW_UAV_SRV_BYTE_ALIGNMENT ||
-            !(placed.alias->GetDesc().Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS))
-            reason = "an output is not an aliased placed buffer range with unordered access";
+        if (words[0] == view_token_magic) reason = "an output buffer descriptor is a view token";
+        else if (!bytes) reason = "an output buffer descriptor has zero records";
+        else if (!sized) reason = "an output buffer range is over 16 MiB or not whole dwords";
+        else if (placed.reject) reason = "an output range crosses the end of a placed buffer";
+        else if (!placed.owner) reason = "an output is in title memory outside any placed buffer";
+        else if (!placed.alias) reason = "an output is in a placed buffer that does not alias title memory";
+        else if (!info || info->initial_state != D3D12_RESOURCE_STATE_COMMON)
+            reason = "an output buffer's resource was not created in the common state";
+        else if (offset % D3D12_RAW_UAV_SRV_BYTE_ALIGNMENT) reason = "an output buffer range is not 16-byte aligned in its resource";
+        else if (!(placed.alias->GetDesc().Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS))
+            reason = "an output buffer has no unordered access";
         for (std::size_t input = 0; input < inputs && !reason; ++input)
             if (views[input].resource == placed.alias) reason = "an output buffer is also an input";
         views[i] = {placed.alias, offset, bytes, true};
