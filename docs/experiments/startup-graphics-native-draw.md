@@ -92,6 +92,25 @@ first version of the new check (steps 1 to 4 and the pixel-stage refusal), run a
 adapters, passes steps 1 and 2 and fails step 3 with the inside pixel at the clear colour
 (`inside 0000ffff outside 0000ffff`): that commit has no in-process graphics route.
 
+Regression runs with the full `dev` build at `2fa1d43f` (the same code), on the same machine. The hook runs on
+every translated first draw, and the tool's rectangle mode goes through the moved job:
+
+```powershell
+cmake --build --preset dev
+ctest --preset dev --no-tests=error -R '^(native_direct_container|native_dxil_llvm_ident|startup_stream_|startup_pixel_history_draw|native_graphics)'
+ctest --preset dev --no-tests=error -R '^native_.*_pso_'
+ctest --preset pr --no-tests=error
+```
+
+- The first set: 31 of 31 pass (the `_warp` and `_hardware` variants of the stream draw, viewport, fetch,
+  interface, depth and rasterizer tests, the pixel-history draw and the native graphics tests among them).
+- The PSO set: `native_rectangle_pso_warp` (the rectangle mode) and `native_graphics_comparison_pso_warp` pass.
+  Capability skip, not a pass: `native_comparison_pso_warp`.
+- The pull request preset: 36 pass. Capability skips, not passes: `spirv_minlod_warp`, `spirv_minlod_exact_warp`,
+  `spirv_minlod_levels_warp` and `spirv_minlod_fractional_warp`.
+
+These three sets were not run at `05438d65`, so whether the five skips predate the change was not measured.
+
 Mutation: with the look for a published `<key>.txt` removed from the first draw, `startup_draw_native_warp`
 fails. Steps 1 to 4 do not depend on that line.
 
