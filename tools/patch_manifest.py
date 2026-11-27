@@ -66,7 +66,7 @@ def parse(text):
     for index, entry in enumerate(data["patch"]):
         where = f"[[patch]] {index}"
         kind = entry.get("kind") if isinstance(entry, dict) else None
-        if kind not in KINDS:
+        if not isinstance(kind, str) or kind not in KINDS:  # a list or table kind is unhashable
             raise ValueError(f"{where}: kind {kind!r} is not supported")
         _keys(entry, COMMON | KINDS[kind], where)
         pid = _text(entry["id"], f"{where} id")
@@ -79,7 +79,10 @@ def parse(text):
         if not isinstance(entry["bytes"], str) or not HEX.fullmatch(entry["bytes"]):
             raise ValueError(f"{where} bytes must be a non-empty, even number of lowercase hex digits")
         replacement = bytes.fromhex(entry["bytes"])
-        spans.append((rva, rva + len(replacement), pid))
+        end = rva + len(replacement)
+        if end > 1 << 32:
+            raise ValueError(f"{where} span [{rva:#x}, {end:#x}) does not fit in 32-bit RVAs")
+        spans.append((rva, end, pid))
         patches.append({
             "id": pid,
             "kind": kind,

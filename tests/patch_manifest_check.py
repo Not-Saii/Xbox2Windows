@@ -77,6 +77,9 @@ class PatchManifest(unittest.TestCase):
         cases = {
             "unknown keys: expect_sha265": ok.replace("expect_sha256 =", "expect_sha265 ="),
             "kind 'hook' is not supported": ok.replace('"memory"', '"hook"'),
+            "kind ['memory'] is not supported": ok.replace('"memory"', '["memory"]'),
+            "kind {'a': 1} is not supported": ok.replace('"memory"', "{a = 1}"),
+            "span [0xffffffff, 0x100000001) does not fit": ok.replace(f"rva = {SECTION_RVA:#x}", "rva = 0xffffffff"),
             "missing: why": ok.replace('why = "synthetic fixture"\n', ""),
             "remove_when must be a non-empty": ok.replace('"never; this is a test"', '" "'),
             "duplicate patch id: p001": ok + ok.split("[target]", 1)[1].split("\n", 2)[2],
@@ -93,6 +96,16 @@ class PatchManifest(unittest.TestCase):
                 self.assertIn(message, str(caught.exception))
         with self.assertRaises(tomllib.TOMLDecodeError):  # the wording differs between Python versions
             patch_manifest.parse(ok.replace("[target]", "[target"))
+        # Shape control for the span check: one byte at the last RVA ends exactly at 2^32.
+        last = ok.replace(f"rva = {SECTION_RVA:#x}", "rva = 0xffffffff").replace(REPLACEMENT, "90")
+        [patch] = patch_manifest.parse(last)[1]
+        self.assertEqual((patch["rva"], patch["bytes"]), (0xFFFFFFFF, b"\x90"))
+        # A wrong-type kind must reach the CLI as a diagnostic, not a traceback.
+        self.manifest.write_text(ok.replace('"memory"', '["memory"]'), encoding="utf-8", newline="\n")
+        result = self.cli(self.input)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("patch manifest: [[patch]] 0: kind ['memory'] is not supported", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
 
 
 if __name__ == "__main__":
