@@ -98,6 +98,12 @@ Commit `be9a0706` on `cpp-migration` at `4ff5e36d`, Windows 11 build 26300.9974,
 | `native_rtv_variant_hardware` | NVIDIA GeForce RTX 4090, 32.0.16.1088 | PASS. The three readbacks match the table. No debug-layer error message. |
 | `native_rtv_variant_warp` | Microsoft Basic Render Driver, 10.0.26100.9818 | PASS. The three readbacks match the table. No debug-layer error message. |
 
+Release: the same commit built with the `release` preset (`cmake --preset release`, `cmake --build --preset
+release`, `ctest --preset release` with the same filters; MSVC 19.44.35230) on the same machine. The three tests
+pass on both adapters with the same readbacks and no debug-layer error message, the controls pass 12 runs in a
+row, and the first regression set below gives the same 45 passes and 3 capability skips. The pull request
+preset is a Debug preset and was not run in Release.
+
 Baseline: at `05438d65` the tool does not scan `.rtv` files. A directory with a base request and one variant
 request gives `requests=1 compiled=1 refused=0` and nothing under the variant key (run with a format 2 request
 published by the stand-in on each of the two adapters).
@@ -138,4 +144,5 @@ measured here.
   `gfx2hlsl.py`.
 - The runtime's `mrtbits` entry value is not used: the native pixel stage keeps float32 bits without it. This
   was measured for the four words above on the two adapters only.
-- Only the two adapters above were run, in a Debug build. No start-up run used a variant compiled this way.
+- Only the two adapters above were run, in Debug and Release builds on one machine. No start-up run used a
+  variant compiled this way.
