@@ -45,9 +45,13 @@ here no word is written. `startup_compute_dispatch_warp` uses the same stand-in,
 module compiled by DXC, and it passes. A rerun with `X2W_TEST_DEBUG_LAYER=1` set printed no `x2w-d3d12-debug` line.
 I did not confirm that the debug layer was active on that path.
 
-**Still open:** whether the native module fails in the stand-in only on WARP, or also on hardware
-(`startup_compute_dispatch_native_hardware` was not run for this note). These are the first runs of this path on a
-32-lane WARP, so a stand-in or translator defect is not ruled out.
+On the RTX 4090 (driver 32.0.16.1088), `startup_compute_dispatch_native_hardware` (all 320 words match, from an
+empty cache and from a published translation) and `native_startup_request_cache_hardware` pass in the same build.
+The failure is therefore specific to WARP. It happens with a native module dispatched through the stand-in, and not
+with the standalone native fixtures or with an HLSL module dispatched through the stand-in.
+
+**Still open:** the cause. A WARP 1.0.22 defect and a translator or stand-in construct that hardware tolerates are
+both possible.
 
 ## Agility SDK 1.620.2 on this machine
 
@@ -104,7 +108,7 @@ Remove-Item out/build/dev/d3d10warp.dll
 
 Commit `88cddb09`. Windows 11 build 26300, in-box `D3D12Core.dll` 10.0.26100.9818 (SDK version 616). MSVC
 14.44.35207, Windows SDK 10.0.26100 (DXC from that SDK), Debug build. NVIDIA GeForce RTX 4090 (driver 32.0.16.1088),
-not used: no `_hardware` test was run. WARP `d3d10warp.dll` 1.0.22.0.20261027.1 and Agility `D3D12Core.dll`
+used only for the two stand-in `_hardware` runs. WARP `d3d10warp.dll` 1.0.22.0.20261027.1 and Agility `D3D12Core.dll`
 1.620.2.0.20261106.5 were Microsoft-signed. `offscreen_check` reported `debug_layer=enabled`. The native fixtures
 do not enable the debug layer.
 
@@ -113,4 +117,4 @@ do not enable the debug layer.
 - The in-box result depends on this Windows build. On Windows 10, #147 found that WARP 1.0.22 on the in-box runtime
   misses every DXR ray. That is why `OFFSCREEN_WARP_DIR` requires `OFFSCREEN_AGILITY_620_DIR`. The in-box runtimes of
   CI runner images have not been measured.
-- The cause of the two stand-in failures is unknown (see above).
+- The cause of the two WARP-only stand-in failures is unknown (see above).
