@@ -37,7 +37,7 @@ out\pe-env\Scripts\python.exe -B tools\dxc_compile_time.py --dxc <path-to-dxc.ex
 | samplebranch_16384 | 3,915,833 | 60.028 | 57.188 | 48.562 (84.9 %) | 8.63 | 11.194 | 8.125 |
 
 - **GVN grows about fourfold per doubling** (4.75x, then 3.83x). The other passes grow 2.4x and 2.3x.
-- **Switching GVN off leaves the rest unchanged:** the GVN-off pass time (1.61, 3.70, 8.13 s) matches the time of the other passes in the default runs. Removing GVN does not move work to another pass.
+- **The other passes take a similar total time with GVN off:** 1.61, 3.70 and 8.13 s, against 1.56, 3.77 and 8.63 s for the passes other than GVN in the default runs. These are single-run totals. They do not show whether time moves between individual passes.
 - **Speed-up:** 2.1x, 3.5x and 5.4x in wall time. `samplebranch_16384` compiles in 11.2 s here, against 18-28 s on the Ryzen 7 3700X in the earlier note. That earlier figure is still slower than `-Od`.
 - **Largest passes with GVN off:** instruction combining (25.6-29.1 %) and the always-inline inliner (12.5-14.6 %).
 - **Timer resolution:** the reported pass times are multiples of about 15.6 ms. Shares on variants below about 0.5 s are not meaningful.
