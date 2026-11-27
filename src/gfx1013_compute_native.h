@@ -125,6 +125,8 @@ struct NativeVertexElement {
 struct DirectGraphicsPair {
     NativeComputeShader vertex, pixel;
     std::vector<NativeVertexElement> input_layout;
+    // GuestShaderStage::target_components of the pixel stage: the target types an RTV variant asked for.
+    std::array<unsigned char, 8> target_components{};
     GraphicsConstantLayout constant_layout() const {
         GraphicsConstantLayout layout;
         for (auto *stage : {&vertex, &pixel})
@@ -135,7 +137,8 @@ struct DirectGraphicsPair {
 };
 DirectGraphicsPair translate_graphics_pair(std::string_view a, std::string_view b,
                                           const D3D12_ROOT_SIGNATURE_DESC1 &layout, std::string_view pixel_entry = {},
-                                          std::optional<GpuStage> first_stage = {});
+                                          std::optional<GpuStage> first_stage = {},
+                                          const std::array<unsigned char, 8> &target_components = {});
 DirectGraphicsPair translate_graphics_pair(std::string_view a, std::string_view b);
 DirectGraphicsPair translate_reflected_graphics(GuestShaderStage &vs, GuestShaderStage &ps,
                                                 const D3D12_ROOT_SIGNATURE_DESC1 &layout);

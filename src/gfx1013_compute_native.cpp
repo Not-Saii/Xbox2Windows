@@ -1833,7 +1833,8 @@ static GuestShaderStage read_raw_graphics(std::string_view bytes, const D3D12_RO
 
 x2w::DirectGraphicsPair x2w::translate_graphics_pair(std::string_view a,std::string_view b,
                                                      const D3D12_ROOT_SIGNATURE_DESC1 &layout, std::string_view pixel_entry,
-                                                     std::optional<GpuStage> first_stage) {
+                                                     std::optional<GpuStage> first_stage,
+                                                     const std::array<unsigned char, 8> &target_components) {
     const bool raw = a.substr(0,4)!="DXBC" && b.substr(0,4)!="DXBC";
     unsigned enable_mask=0, address_mask=0;
     if (!pixel_entry.empty()) {
@@ -1854,6 +1855,7 @@ x2w::DirectGraphicsPair x2w::translate_graphics_pair(std::string_view a,std::str
     auto *vs=&left.front(),*ps=&right.front();
     if(vs->stage==GpuStage::ps)std::swap(vs,ps);
     if(vs->stage!=GpuStage::vs || ps->stage!=GpuStage::ps)refuse(0,"expected vertex and pixel stages");
+    ps->target_components=target_components;
     return translate_reflected_graphics(*vs,*ps,layout);
 }
 x2w::DirectGraphicsPair x2w::translate_reflected_graphics(GuestShaderStage &vs, GuestShaderStage &ps,

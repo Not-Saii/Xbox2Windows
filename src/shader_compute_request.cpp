@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace fs = std::filesystem;
 namespace {
@@ -121,9 +122,64 @@ void parse_pixel_inputs(const fs::path &marker, uint64_t expected, Bytes &entry,
                   static_cast<unsigned long long>(expected), ena, addr);
     description = text;
 }
+// tools/startup/gfx2hlsl.py request_source: at most 256 bytes of "rtv1 <base key> <format> ..." in decimal with one to
+// eight formats and nothing else, whose FNV-1a hash is the key in the file name. The variant is translated from its
+// base request's parts, which are read and checked against the base key like any base request.
+x2w::GraphicsRequest read_rtv_variant(const fs::path &marker) {
+    const auto stem = marker.stem().string();
+    if (stem.size() != 20 || stem.compare(0, 4, "req_"))
+        throw std::runtime_error("expected req_<16 hex digits>.rtv");
+    const uint64_t expected = parse_request_stem(stem, "invalid RTV variant request key");
+    Bytes text;
+    try {
+        text = part(marker, ".rtv", 256);
+    } catch (const std::runtime_error &) {
+        throw std::runtime_error("invalid RTV variant request");
+    }
+    uint64_t key = 1469598103934665603ull;
+    hash_bytes(key, text.data(), text.size());
+    std::vector<std::string_view> tokens;
+    std::string_view rest = text;
+    bool valid = rest.substr(0, 5) == "rtv1 ";
+    if (valid) rest.remove_prefix(5);
+    while (valid) {
+        const size_t end = rest.find(' ');
+        const auto token = rest.substr(0, end);
+        valid = !token.empty() && token.size() <= (tokens.empty() ? 20u : 10u) &&
+                token.find_first_not_of("0123456789") == token.npos;
+        tokens.push_back(token);
+        if (end == rest.npos) break;
+        rest.remove_prefix(end + 1);
+    }
+    if (!valid || tokens.size() < 2 || tokens.size() > 9 || key != expected)
+        throw std::runtime_error("invalid RTV variant request");
+    uint64_t base = 0;
+    std::vector<unsigned> formats;
+    for (size_t i = 0; i < tokens.size(); ++i) {
+        uint64_t value = 0;
+        const auto parsed = std::from_chars(tokens[i].data(), tokens[i].data() + tokens[i].size(), value);
+        if (parsed.ec != std::errc{} || (i && value > 0xffffffffull))
+            throw std::runtime_error("invalid RTV variant values");
+        if (!i) base = value;
+        else formats.push_back(static_cast<unsigned>(value));
+    }
+    char name[32];
+    std::snprintf(name, sizeof(name), "req_%016llx.a", static_cast<unsigned long long>(base));
+    x2w::GraphicsRequest request;
+    try {
+        request = x2w::read_graphics_request(marker.parent_path() / name);
+    } catch (const std::runtime_error &error) {
+        throw std::runtime_error(std::string("RTV variant source: ") + error.what());
+    }
+    request.key = expected;
+    request.rtv_request = std::move(text);
+    request.rtv_formats = std::move(formats);
+    return request;
+}
 } // namespace
 
 x2w::GraphicsRequest x2w::read_graphics_request(const fs::path &marker) {
+    if (marker.extension() == ".rtv") return read_rtv_variant(marker);
     auto stem = marker.stem().string();
     if (marker.extension() != ".a" || stem.size() != 20 || stem.compare(0, 4, "req_"))
         throw std::runtime_error("expected req_<16 hex digits>.a");

@@ -293,20 +293,21 @@ struct GraphicsStage {
     }
     unsigned output(unsigned target, unsigned &channel) {
         if (pixel && target < 8) {
+            // An RTV variant types the target by its format. A signature that says otherwise is not reinterpreted.
+            const unsigned asked = stage.target_components[target];
             for (const auto &s : stage.output_signature) {
                 if (s.system != D3D_NAME_TARGET || s.index != target)
                     continue;
                 if (s.row != target || !(s.mask & (1u << channel)) || !s.component || s.component > 3)
                     refuse(pc, "color export incompatible with pixel signature");
-                return row(false, "SV_Target", target, 16,
-                           s.component == 3   ? 9
-                           : s.component == 2 ? 4
-                                              : 5,
-                           s.row, s.mask, 0);
+                const unsigned component = s.component == 3 ? 9 : s.component == 2 ? 4 : 5;
+                if (asked && asked != component)
+                    refuse(pc, "RTV variant format disagrees with the pixel signature of target " + to_string(target));
+                return row(false, "SV_Target", target, 16, component, s.row, s.mask, 0);
             }
             if (!stage.output_signature.empty())
                 refuse(pc, "color target absent from pixel signature");
-            return row(false, "SV_Target", target, 16, 9, target, 15, 0);
+            return row(false, "SV_Target", target, 16, asked ? asked : 9, target, 15, 0);
         }
         if (pixel && target == 8) {
             for (const auto &s : stage.output_signature) {

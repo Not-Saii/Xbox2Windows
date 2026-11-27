@@ -471,7 +471,27 @@ static std::vector<NativeVertexElement> vertex_layout(std::string_view text, con
 
 DirectGraphicsPair prepare_direct_graphics(std::string_view a, std::string_view b, const fs::path &cache,
                                            bool &cache_hit, std::string_view root, std::string_view input_layout,
-                                           std::string_view pixel_entry, bool write_cache) {
+                                           std::string_view pixel_entry, bool write_cache,
+                                           const std::vector<unsigned> &rtv_formats) {
+    // An RTV variant types each color target by its format, as tools/startup/gfx2hlsl.py mrt_kind does: u32 or i32
+    // for the integer formats, f32 for every other format.
+    std::array<unsigned char, 8> targets{};
+    if (rtv_formats.size() > targets.size()) throw UnsupportedComputeShader("invalid RTV variant values");
+    for (size_t i = 0; i < rtv_formats.size(); ++i) {
+        const unsigned component = dxil_io_component(rtv_formats[i]);
+        targets[i] = static_cast<unsigned char>(component == 5 || component == 4 ? component : 9);
+    }
+    // The two three-channel 32-bit integer formats have no verified readback there. As there, one is refused by
+    // name only when the pixel stage exports to its target; the stage's cached form does not depend on which
+    // format of a type was asked for, so this is checked on a cache hit too.
+    const auto verified = [&](DirectGraphicsPair pair) {
+        for (size_t i = 0; i < rtv_formats.size(); ++i)
+            if (pair.pixel.pixel_writes[i] &&
+                (rtv_formats[i] == DXGI_FORMAT_R32G32B32_UINT || rtv_formats[i] == DXGI_FORMAT_R32G32B32_SINT))
+                throw UnsupportedComputeShader(std::string("unverified ") + (targets[i] == 5 ? "UINT" : "SINT") +
+                                               " RTV format " + std::to_string(rtv_formats[i]));
+        return pair;
+    };
     // A fixed PSO can expose a shorter serialized desktop root than the
     // guest's hardware descriptor table. An explicitly supplied companion
     // describes the guest ABI. Never use its executable code in the pair.
@@ -502,7 +522,10 @@ DirectGraphicsPair prepare_direct_graphics(std::string_view a, std::string_view 
     const bool reflected = !companions[0].empty();
     if (reflected != !companions[1].empty()) throw UnsupportedComputeShader("incomplete raw graphics interface pair");
     if (reflected && root.empty()) throw UnsupportedComputeShader("missing captured root for reflected graphics");
-    const auto key = shader_digest(identity + shader_digest(root) + shader_digest(input_layout) + shader_digest(pixel_entry));
+    // The base pair keeps its key. A variant adds its target types, so formats of one type share an entry.
+    const Bytes typed = rtv_formats.empty() ? Bytes{}
+        : shader_digest(std::string_view(reinterpret_cast<const char *>(targets.data()), targets.size()));
+    const auto key = shader_digest(identity + shader_digest(root) + shader_digest(input_layout) + shader_digest(pixel_entry) + typed);
     const auto path = cache / (key + ".pairir");
     Bytes payload;
     cache_hit = write_cache && !cache.empty() && lookup(path, key, payload);
@@ -527,7 +550,9 @@ DirectGraphicsPair prepare_direct_graphics(std::string_view a, std::string_view 
             Reader in{payload};
             auto vertex = decode(in.take(in.word()));
             auto elements = vertex_layout(effective_layout(vertex), vertex);
-            return {std::move(vertex), decode(in.remaining), std::move(elements)};
+            return verified({std::move(vertex), decode(in.remaining), std::move(elements), targets});
+        } catch (const UnsupportedComputeShader &) {
+            throw;
         } catch (const std::runtime_error &) {
             cache_hit = false;
         }
@@ -588,8 +613,10 @@ DirectGraphicsPair prepare_direct_graphics(std::string_view a, std::string_view 
             stage.code.assign(raw[i]);
             stage.exports.clear();
         }
+        interfaces.at(GpuStage::ps).target_components = targets;
         pair = translate_reflected_graphics(interfaces.at(GpuStage::vs),interfaces.at(GpuStage::ps),layout);
-    } else pair = translate_graphics_pair(a, b, layout, pixel_entry, first_stage);
+    } else pair = translate_graphics_pair(a, b, layout, pixel_entry, first_stage, targets);
+    pair.target_components = targets;
     if (!entry.empty()) {
         const auto &attrs = interfaces.at(GpuStage::ps).attributes;
         std::vector<unsigned> channels(attrs.size());
@@ -688,7 +715,7 @@ DirectGraphicsPair prepare_direct_graphics(std::string_view a, std::string_view 
         payload += encode(pair.pixel);
         publish(path, key, payload);
     }
-    return pair;
+    return verified(std::move(pair));
 }
 
 std::optional<std::string> format_compute_runtime_manifest(const NativeComputeShader &program) {
@@ -768,14 +795,16 @@ std::optional<std::string> format_compute_runtime_manifest(const NativeComputeSh
     return out.str();
 }
 
-std::optional<std::string> format_graphics_runtime_manifest(const DirectGraphicsPair &pair) {
+std::optional<std::string> format_graphics_runtime_manifest(const DirectGraphicsPair &pair, std::string_view rtv_request) {
     if (pair.vertex.vertex_fetch || !pair.input_layout.empty())
         return std::nullopt;
     for (const auto &in : pair.vertex.inputs)
         if (in.name != "SV_VertexID" && in.name != "SV_InstanceID")
             return std::nullopt;
+    // An integer target is published only for the RTV variant whose format asked for that type.
     for (const auto &out : pair.pixel.outputs)
-        if (out.name == "SV_Target" && out.component != 9)
+        if (out.name == "SV_Target" && out.component != 9 &&
+            (out.index >= pair.target_components.size() || out.component != pair.target_components[out.index]))
             return std::nullopt;
 
     std::optional<NativeGraphicsBindings> maybe_bindings;
@@ -876,6 +905,8 @@ std::optional<std::string> format_graphics_runtime_manifest(const DirectGraphics
             out << line;
         }
     }
+    if (!rtv_request.empty())
+        out << rtv_request << '\n';
     return out.str();
 }
 } // namespace x2w

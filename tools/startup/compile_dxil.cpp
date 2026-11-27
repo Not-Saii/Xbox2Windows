@@ -552,6 +552,7 @@ int wmain(int argc, wchar_t** argv) {
                      "gfx1013-container-cs reads an optional req_<key>.views next to the .cdx (GPU-selected heap slot view types).\n"
                      "gfx1013-container-pair accepts two containers and emits VS then PS using the runtime register allocation.\n"
                      "For capture directories use PROFILE --requests DIRECTORY OUTPUT_DIRECTORY. "
+                     "gfx1013-container-pair also takes each req_<key>.rtv (rtv1 BASE_KEY FORMAT ...) and publishes it under its key.\n"
                      "gfx1013-container-rect also emits the rectangle geometry stage.\n"
                      "Use --refusals REQUEST_DIRECTORY [--jobs N] [--json] for a read-only refusal summary.\n"
                      "Use --index-graphics-interfaces REVIEWED_DIRECTORY CACHE_DIRECTORY to index native graphics interfaces.\n";
@@ -571,11 +572,19 @@ int wmain(int argc, wchar_t** argv) {
             const auto extension = graphics_batch ? L".a" : profile == L"gfx1013-container-cs" ? L".cdx" : L".c67";
             for (const auto& file : fs::directory_iterator(argv[first+1])) {
                 const auto path = file.path();
-                if (file.is_regular_file() && path.extension()==extension && path.stem().wstring().rfind(L"req_",0)==0)
+                // An RTV variant (req_<key>.rtv) is a request of its own, translated from its base request's parts.
+                const bool marker = path.extension()==extension || (graphics_batch && !rectangles && path.extension()==L".rtv");
+                if (file.is_regular_file() && marker && path.stem().wstring().rfind(L"req_",0)==0)
                     inputs.push_back(fs::weakly_canonical(path));
             }
             if (inputs.empty()) throw std::runtime_error("no ready shader requests");
             std::sort(inputs.begin(),inputs.end());
+            // A key with both markers is one request, the variant, as in gfx2hlsl.py request_source. The two would
+            // otherwise name the same outputs.
+            for (size_t i = 0; i + 1 < inputs.size();)
+                if (inputs[i].extension()==L".a" && inputs[i+1].extension()==L".rtv" && inputs[i].stem()==inputs[i+1].stem())
+                    inputs.erase(inputs.begin()+i);
+                else ++i;
             fs::create_directories(argv[first+2]);
             for (const auto& path : inputs) {
                 auto key_stem = path.stem().wstring().substr(4);
@@ -663,9 +672,19 @@ int wmain(int argc, wchar_t** argv) {
             fs::remove(manifest_path, ignored);
             auto input = x2w::read_graphics_request(inputs[i]);
             bool hit = false;
-            auto pair = x2w::prepare_direct_graphics(input.a, input.b, argv[2], hit, input.root, input.input_layout, input.pixel_entry);
+            auto pair = x2w::prepare_direct_graphics(input.a, input.b, argv[2], hit, input.root, input.input_layout, input.pixel_entry,
+                                                     true, input.rtv_formats);
             report << "graphics_pair frontend_cache_hit=" << hit << '\n';
-            auto manifest = rectangles ? std::nullopt : x2w::format_graphics_runtime_manifest(pair);
+            if (!input.rtv_request.empty()) {
+                report << "rtv_variant " << input.rtv_request << " types=";
+                for (size_t t = 0; t < input.rtv_formats.size(); ++t)
+                    report << (t ? "," : "") << (pair.target_components[t] == 5 ? "u32" : pair.target_components[t] == 4 ? "i32" : "f32");
+                report << '\n';
+            }
+            auto manifest = rectangles ? std::nullopt : x2w::format_graphics_runtime_manifest(pair, input.rtv_request);
+            // A base pair without a manifest still publishes its stages. A variant is of use to the runtime only.
+            if (!manifest && !input.rtv_request.empty())
+                throw std::runtime_error("RTV variant has no runtime manifest: its vertex inputs, target types or bindings are not described");
             std::vector<unsigned char> gs_dxil;
             if (rectangles) {
                 auto ir=x2w::native_rectangle_geometry(pair.vertex.outputs,pair.pixel.inputs);
