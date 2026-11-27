@@ -9,7 +9,8 @@ beside the test executables. No translator or test code changes.
 
 ## Result
 
-**The app-local `d3d10warp.dll` is what provides 32-lane waves. The Agility SDK runtime does not.** On this machine,
+**The app-local `d3d10warp.dll` is what provides 32-lane waves. The Agility SDK runtime alone does not:** loaded
+through `CreateDeviceFactory` (see below), Agility 1.620.2 with the in-box WARP reports 4..4 lanes. On this machine,
 WARP 1.0.22 loaded by the in-box D3D12 runtime reports `WaveOps=1`, lanes 4 to 128 and SM 6.8. A configure with
 `OFFSCREEN_WARP_DIR` already copies the DLL into the build root, next to every test executable, so the tests below
 use it without any change to their CMake targets.
@@ -24,8 +25,9 @@ use it without any change to their CMake targets.
 | `shader_wave32_warp` (gate) | `offscreen_check` | not run | pass: `forced32 width=32 waves=2 ... mismatches=0`, debug layer enabled, 0 errors |
 | `bvh_wave64_warp` (#145) | `offscreen_check` | not run | **fail**: `record=0 field=25 expected=f0094d90 actual=f03aeb40` |
 
-Control: the same `warp122` binaries with `d3d10warp.dll` renamed away report `(4..4)` and skip with 77. The
-executables have no export table, so the in-box `D3D12Core.dll` loads. A scratch probe started from the same
+Control: with `d3d10warp.dll` renamed away, the same `warp122` binaries of `native_heap_handle_probe_warp` and
+`native_global_srv_heap_replay_warp` report `(4..4)` and skip with 77. The `native_comparison_pso_warp` row in the
+in-box column comes from the options-unset build. The three executables have no export table, so the in-box `D3D12Core.dll` loads. A scratch probe started from the same
 directory printed `C:\WINDOWS\SYSTEM32\D3D12Core.dll` and the `d3d10warp.dll` from the build root.
 
 Negative control: changing one expected word in `reference_output()` of `tests/native_global_srv_heap_replay.cpp`
@@ -40,7 +42,8 @@ as before: four skip with 77 and `native_startup_request_cache_warp` passes thro
 Both run the native module through the stand-in (`d3d12_xs_shim`). The dispatch is recorded and the fence signals,
 but the output keeps its `0xc5c5c5c5` fill. This is not the #145 shape, where values arrive from the wrong lanes:
 here no word is written. `startup_compute_dispatch_warp` uses the same stand-in, executable and WARP, with an HLSL
-module compiled by DXC, and it passes. `X2W_TEST_DEBUG_LAYER=1` printed no `x2w-d3d12-debug` line.
+module compiled by DXC, and it passes. A rerun with `X2W_TEST_DEBUG_LAYER=1` set printed no `x2w-d3d12-debug` line.
+I did not confirm that the debug layer was active on that path.
 
 **Still open:** whether the native module fails in the stand-in only on WARP, or also on hardware
 (`startup_compute_dispatch_native_hardware` was not run for this note). These are the first runs of this path on a
@@ -58,14 +61,18 @@ module compiled by DXC, and it passes. `X2W_TEST_DEBUG_LAYER=1` printed no `x2w-
 - **Unknown:** the cause of the export-path failure on this build.
 - **The opt-in build does not compile on current `main`.** `src/startup_stubs/d3d12_compute_dispatch.inl` asserts
   `sizeof(D3D12_SHADER_RESOURCE_VIEW_DESC) == 40` and the same for the UAV description. With the Agility 1.620 headers
-  both are 48 bytes, so `d3d12_xs_shim` and `offscreen_check` fail to build when `OFFSCREEN_AGILITY_620_DIR` is set.
+  the UAV description is 48 bytes (the SRV description stays 40), so `d3d12_xs_shim` and `offscreen_check` fail to build when `OFFSCREEN_AGILITY_620_DIR` is set.
   That is why the last four rows were measured in an options-unset build with the DLL copied in by hand.
 
 ## #145 and the native lowerings
 
 `bvh_wave64_warp` still fails at field 25, the non-uniform `WaveReadLaneAt` shuffle that #145 describes. On this
-machine the actual value differs from the #145 report (`f053ba18` there, `f03aeb40` here).
-I have not decoded or investigated it further.
+machine the value is different. With the #145 encoding (`0xf0000001 ^ (lane * 0x319db)`):
+- expected `f0094d90` is lane 3;
+- this run's `f03aeb40` decodes to lane 19;
+- the `f053ba18` in #145 decodes to lane 27, the inverse permutation.
+
+This run used the in-box runtime, not Agility. I have not investigated it further.
 
 None of the three passing native tests lowers `v_readlane`, DPP or `v_permlane*`. Those fixtures run on
 `native_store_replay`, which creates its device on the default adapter and has only `_hardware` entries. So whether
