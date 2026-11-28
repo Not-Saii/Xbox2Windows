@@ -27,12 +27,14 @@
      non-contiguous SRV or UAV registers, an SRV or UAV kind with no manifest line (the kind, and for
      images the dimension and `array`), more than 32 SRVs or 8 UAVs, a comparison sampler, and stride
      words from a view that is not one raw vector SRV. No register numbers, offsets or keys.
-   - `--requests` still publishes `<key>.cs.cso` and no `<key>.txt`, and still counts the request as
-     compiled; it now also writes the reason to `<key>.fail`. `--watch` writes the same line instead of
-     the former reasonless one, and `--refusals` counts the request under it instead of under
-     no refusal. `triage_run.py` reports it as `runtime manifest: <reason>`.
-   - With `X2W_SKIP_FAILED=1` / `--skip-failed`, the Python watcher skips such a key when the output
-     directory is used as a live cache, as it already did after `--watch` wrote its `.fail`.
+   - `--requests` still publishes `<key>.cs.cso` and no `<key>.txt`, still counts the request as
+     compiled and still removes `<key>.fail`. It prints the reason in that job's report as
+     `no_manifest input=req_<key>.c67 <reason line>`. It writes no `.fail`, because `.fail` is the retry
+     marker of both watchers: with `X2W_SKIP_FAILED=1` / `--skip-failed` the Python watcher keeps
+     selecting such a key in a live cache.
+   - `--watch`, which refuses the key, writes the same line to `<key>.fail` instead of the former
+     reasonless one. `--refusals` counts the request under it instead of under no refusal.
+     `triage_run.py` reports the `.fail` line as `runtime manifest: <reason>`.
 
 ## Verification
 

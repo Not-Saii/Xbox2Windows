@@ -1030,13 +1030,10 @@ int wmain(int argc, wchar_t** argv) {
                 std::string reason;
                 auto manifest = compile_one(compiler, job_profile(i), inputs[i], outputs[i], argv[2], report, nullptr, true, &reason);
                 if (manifest) publish_atomic(manifest_path, manifest->data(), manifest->size());
-                // The DXIL stays published; the .fail names why no manifest was.
-                if (!manifest && !reason.empty()) {
-                    const auto line = format_fail_line(manifest_refusal(reason));
-                    publish_atomic(fs::path(stems[i]) += L".fail", line.data(), line.size());
-                } else {
-                    fs::remove(fs::path(stems[i]) += L".fail", ignored);
-                }
+                // Not a .fail: that file is the watchers' retry marker, and this compile succeeded.
+                if (!manifest && !reason.empty())
+                    report << "no_manifest input=" << inputs[i].filename().string() << ' ' << manifest_refusal(reason) << '\n';
+                fs::remove(fs::path(stems[i]) += L".fail", ignored);
                 return;
             }
             const fs::path manifest_path = fs::path(stems[i]) += L".txt";
