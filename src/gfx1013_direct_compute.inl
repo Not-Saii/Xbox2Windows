@@ -1191,11 +1191,16 @@ struct DirectCompute {
         const auto op = decode_local_data(i.a, i.b);
         // The host executes a guest wave64 on two wave32s. Meet before
         // each operation, outside its lane predicate, as in Victory split_lds.
-        // With lane pairs both lane sets are in one host wave and no meeting is needed.
         if (wave64 && !lane_pairs)
             barrier();
         const auto label = to_string(label_number++);
         auto enabled = active();
+        // With lane pairs both lane sets are in one host wave, where a group barrier cannot stand in guest
+        // control flow. A guest lane may still read what another lane of its wave wrote one instruction earlier,
+        // and only a wave operation makes a host bring all lanes of a wave to the same point. So the predicate
+        // comes from a ballot. Without it app-local WARP 1.0.22 reads words the other lanes have not written yet.
+        if (lane_pairs)
+            enabled = cmp("ne", ir.binary("and", ballot(enabled), lane_bit), "0");
         ir.body << "  br i1 " << enabled << ", label %ds" << label << ", label %dsDone" << label << "\nds" << label
                 << ":\n";
         const auto address = read(256 + op.address);

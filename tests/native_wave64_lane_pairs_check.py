@@ -495,6 +495,13 @@ def controls(cli, replay_tool, sdk, work):
     for name, ir in pairs.items():
         assert "NumThreads=(64,1,1)" in ir and "waveExchange" not in ir, (name, ir)
         print(f"{name}, {size(name, 128)} threads: lane pairs (64 host threads, no exchange memory)")
+    # A guest lane may read LDS that another lane of its wave wrote one instruction earlier. Each LDS access
+    # of a lane-pair module therefore takes its lane predicate from a ballot of its own, which brings the
+    # host wave's lanes to that point together: lds_same_address has one ballot at entry and one per lane
+    # set for each of its two LDS instructions.
+    ballots = sum("call" in line and "waveActiveBallot" in line for line in pairs["lds_same_address"].splitlines())
+    assert ballots == 5, (ballots, pairs["lds_same_address"])
+    print("lds_same_address, 128x1x1 threads: a ballot per lane set before each LDS access")
     # One guest wave: the same program keeps split halves and their exchange memory.
     requests = work / "requests_64"
     requests.mkdir()

@@ -23,9 +23,21 @@ compile to the same module as before.
   register in both emissions is refused ("lane-pair layout: one scalar register written for both lane sets").
 - A compare ballots its own word, without exchange memory or a barrier. `v_readlane_b32` reads both sets and
   selects by lane. `v_readfirstlane_b32` takes the first active lane of the low set, else of the high set, and
-  lane 0 for an empty EXEC. LDS accesses need no meeting barrier.
+  lane 0 for an empty EXEC.
 - Guest thread ids are computed per lane set from the host wave index and lane, so the guest group shape only
   enters that arithmetic. TG_SIZE holds the guest wave index and count.
+
+## LDS inside one host wave
+
+A guest lane may read an LDS word that another lane of its wave wrote one instruction earlier. Split halves order
+the two with the group barrier before each LDS access. A lane-pair module cannot place a group barrier in guest
+control flow, and D3D12 does not say that a host runs the lanes of a wave in step. Each LDS access of a lane-pair
+module therefore takes its lane predicate from a `WaveActiveBallot` of its own, because a wave operation needs
+every lane of the wave at that point. Without that ballot, app-local WARP 1.0.22 read words that other lanes had
+not written yet (see Result).
+
+The wave32 path, where one host wave is one guest wave, has no such ballot and is not changed here. A wave32
+program with the same cross-lane read differs on WARP 1.0.22 as well.
 
 ## `s_barrier`
 
@@ -61,8 +73,9 @@ lane pairs. All 2,064 output words are compared, guards included.
 | `exit_before_barrier` | 256×1×1 | wave 0 leaves through an EXECZ skip; waves 1–3 write LDS, meet and read wave 3's words |
 
 `native_wave64_lane_pairs_controls` needs no GPU. It checks that the 128-thread modules declare 64 host threads
-and no exchange memory, that `mask_readlane` with 64 threads keeps the exchange memory, that only
-`exit_before_barrier` gets the barrier loop, and that a barrier inside a loop is refused.
+and no exchange memory, that `lds_same_address` has a ballot per lane set before each LDS access, that
+`mask_readlane` with 64 threads keeps the exchange memory, that only `exit_before_barrier` gets the barrier loop,
+and that a barrier inside a loop is refused.
 `native_wave64_lane_pairs_hardware` returns 77 when replay reports that the adapter lacks the required
 capabilities.
 
@@ -101,12 +114,26 @@ Two results are not asserted for the 64-thread split-halves runs:
     compiles 12 of them as lane pairs and refuses the barrier inside a loop.
 
   This comparison used a local script that is not in the repository.
+- App-local WARP 1.0.22 (`d3d10warp.dll` 1.0.22.0.20261027.1 beside the replay executable, in-box D3D12 runtime).
+  A local script replayed the fixture's requests with `--direct-warp` in place of `--direct`, 12 times each:
+  - all 17 asserted readbacks matched in every run;
+  - a build without the ballot before LDS accesses differed in every run of `lds_divergent` as lane pairs, in
+    the read before the `s_barrier` (word 264, got `0x00000000`, expected `0x00007f05`);
+  - a wave32 program in which each lane reads the word that lane 31 − l wrote one instruction earlier differed
+    in every run (word 8, got `0x00000000`, expected `0x00001f05`). With a compare placed between the write and
+    the read it matched in every run. Its module is byte-identical to the unmodified compiler's.
+- An independent run of the first commit of this change on an RTX 4070 and on WARP 1.0.22 is recorded in
+  [the pull request](https://github.com/R0Y00/Xbox2Windows/pull/3352#issuecomment-7239334348). There
+  `dpp_permlane_divergent` differed on WARP under both layouts (88 words). It matched here.
 
 ## Limits
 
-- One adapter. WARP was not run: the fixture has no `--direct-warp` mode, and the in-box WARP has 4-lane waves
-  (see [the WARP note](native-compute-warp.md)). The debug layer was not enabled, and no dispatch went through
-  the stand-in.
+- Two NVIDIA adapters, the second in the independent run above, which predates the ballot. The fixture has no
+  `--direct-warp` mode, so the WARP runs went through local scripts, and the in-box WARP has 4-lane waves (see
+  [the WARP note](native-compute-warp.md)). The debug layer was not enabled, and no dispatch went through the
+  stand-in.
+- The ballot before an LDS access relies on a wave operation gathering every lane of the host wave. D3D12 does
+  not state that. It held on WARP 1.0.22 in these runs; both GPUs matched without the ballot as well.
 - On hardware, lane pairs ran integer VOP1, VOP2 and VOP3 instructions, compares, `v_cmpx`, DPP row operations,
   `v_permlanex16_b32`, both lane reads, LDS reads and writes, raw buffer stores and one buffer atomic. Buffer
   loads, typed stores, image operations (implicit derivatives included), 16-bit and packed operations go through
@@ -117,4 +144,5 @@ Two results are not asserted for the 64-thread split-halves runs:
   it does not show that an early `ret` would have failed.
 - A lane-pair module emits each vector instruction twice. Module size and timing against split halves were
   measured on an earlier base with a local layout switch that is not part of this change
-  ([#3237 comment](https://github.com/R0Y00/Xbox2Windows/issues/3237#issuecomment-7232595595)).
+  ([#3237 comment](https://github.com/R0Y00/Xbox2Windows/issues/3237#issuecomment-7232595595)). Those numbers
+  predate the ballot before each LDS access, so their LDS rows no longer describe this code.
