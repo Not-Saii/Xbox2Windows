@@ -47,6 +47,18 @@ is unchanged since `2e12dd8e`), counts only. A run of the parent build with the 
 | 3 to 9 | 0 | 0 |
 
 The run made 1,490,517 compute dispatches in all, so the share refused for an output buffer is about the same
-(9.2% and 9.6%). All 23 tokens name views created through device slot 19, the form #2961 binds; whether they are
-buffer views is not in the census. The two zero-record keys have an all-zero descriptor. No key reached a copied
-placement, the initial state, alignment or the unordered-access flag.
+(9.2% and 9.6%). All 23 tokens name views created through device slot 19, the form #2961 binds. The two zero-record
+keys have an all-zero descriptor. No key reached a copied placement, the initial state, alignment or the
+unordered-access flag.
+
+The same run with #2961 merged locally (`51aef000`, not pushed; reason 1 dropped, #2961's token branch first):
+
+| The 23 token keys | Keys | Dispatches |
+|---|---|---|
+| translated, nothing refused | 12 | 32,043 |
+| `an entry value reads the descriptor of an output named by a view token` | 10 | 9,372 |
+| `an output buffer view range is empty, unaligned or outside its resource` | 1 | 190,397 |
+
+None was refused as `an output view token is not a buffer UAV of a desktop resource`, so all 23 are buffer
+unordered access views of desktop resources. That run made 2,453,727 compute dispatches, so dispatch counts compare
+only within one run. Whether the 12 translated keys write the right values was not checked.
