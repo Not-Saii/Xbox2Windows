@@ -17,8 +17,9 @@ this order:
 9. `an output buffer has no unordered access`
 
 Only the reason changes: what was bound is still bound and what was refused is still refused. Output view tokens
-are lowered separately in #2961 (open), which binds a buffer UAV token before these checks; with it, reason 1 is
-not reached. The census keeps one reason per key, the first one that key was refused with, and counts all of the
+are now handled before these checks (#3094, from #2961): a buffer UAV token is bound, and any other token is refused
+with `an output token does not identify a slot-19 UAV`, so reason 1 is no longer reached. The fixture's texture-view
+token expects that reason. The census keeps one reason per key, the first one that key was refused with, and counts all of the
 key's untranslated dispatches under it. A start-up run with this build therefore gives first-refusal buckets, not
 a count per condition: a later dispatch of the same key can fail on another condition, and the per-call refusal
 lines are capped.

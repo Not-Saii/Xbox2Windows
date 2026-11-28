@@ -7,7 +7,8 @@ gfx2hlsl.py --pending with DXC, the unchanged recording still matches all 320 wo
 its buffer is changed one condition at a time, and each dispatch is refused with its own reason in the log and the
 census and writes no output word:
 
-- dispatch-output-texture-token: the token of a texture view where the output descriptor was;
+- dispatch-output-texture-token: the token of a texture view where the output descriptor was (refused by the
+  output-token path, which binds buffer UAV tokens before the descriptor checks);
 - zero records, a range over 16 MiB (stride 4, 4 Mi + 1 records) and a range 16 bytes past the placed output
   buffer, through X2W_TEST_DISPATCH_FIELDS (synthetic values);
 - dispatch-output-unplaced: memory between the two placed buffers;
@@ -36,7 +37,7 @@ def fields(records, stride=4):
 
 
 CONTROLS = (
-    ('dispatch-output-texture-token', None, 'an output buffer descriptor is a view token'),
+    ('dispatch-output-texture-token', None, 'an output token does not identify a slot-19 UAV'),
     ('dispatch', fields(0), 'an output buffer descriptor has zero records'),
     ('dispatch', fields((16 << 20) // 4 + 1), 'an output buffer range is over 16 MiB or not whole dwords'),
     ('dispatch', fields(C.WORDS + 4), 'an output range crosses the end of a placed buffer'),
