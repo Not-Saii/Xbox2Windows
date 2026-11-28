@@ -90,30 +90,34 @@ threshold-32 expectation, inactive mask bits left set, the atomic count without 
 `exit_before_barrier` the model in which wave 0 had not left and the model in which a thread reads its own LDS
 word.
 
-Two results are not asserted for the 64-thread split-halves runs:
+`lds_same_address` is not asserted for the 64-thread split-halves runs, because the two halves race on the shared
+word.
 
-- `lds_same_address`: the two halves race on the shared word.
-- `readfirstlane_empty`: split halves return lane 32, not lane 0, for an empty EXEC. This is a separate defect of
-  that lowering and is not changed here.
+`readfirstlane_empty` is asserted for both layouts. Split halves used to take the upper half's first active lane
+whenever EXEC's low word was zero, so an empty EXEC returned guest lane 32. They now take it only when the high
+word is not zero, as lane pairs do, and an empty EXEC returns lane 0.
 
 ## Result
 
-`main` `052abe6f` plus this change, Debug build. Windows 11 build 26300, NVIDIA GeForce RTX 4090 (driver
-32.0.16.1088, 32-lane waves), DXC from Windows SDK 10.0.26100. The debug layer was not enabled.
+All runs used a Debug build on Windows 11 build 26300, NVIDIA GeForce RTX 4090 (driver 32.0.16.1088, 32-lane
+waves), DXC from Windows SDK 10.0.26100. The debug layer was not enabled.
+
+Lane pairs, `main` `052abe6f` plus the lane-pair change:
 
 - `native_wave64_lane_pairs_controls` passed.
 - `native_wave64_lane_pairs_hardware` passed. The nine 128-thread programs and `exit_before_barrier` matched their
-  models as lane pairs. Seven of the nine matched as split halves with 64 threads; the other two are the ones not
-  asserted above. All 16 negative controls reported a mismatch, for example `mask_readlane` with the sets
-  exchanged (word 264, got `0xffffffff`, expected `0x00001fff`) and `atomic_count` without the high lane set
-  (word 8, got `0x69696999`, expected `0x69696979`).
+  models as lane pairs. Seven of the nine matched as split halves with 64 threads. `lds_same_address` was not
+  asserted, and that build returned lane 32 for `readfirstlane_empty`. All 16 negative controls reported a
+  mismatch, for example `mask_readlane` with the sets exchanged (word 264, got `0xffffffff`, expected
+  `0x00001fff`) and `atomic_count` without the high lane set (word 8, got `0x69696999`, expected `0x69696979`).
 - Against an unmodified compiler built from `052abe6f`, over 44 requests (the fixture programs with 64 and 128
   threads, the slot 67 wave-size program and three straight-line programs with 64, 128 and 256 threads):
-  - all 31 modules that compiler produces are byte-identical in this build;
-  - it refuses the other 13 with "multi-wave64 exchange requires converged group control flow". This build
-    compiles 12 of them as lane pairs and refuses the barrier inside a loop.
+  - all 31 modules that compiler produces are byte-identical in the lane-pair build;
+  - it refuses the other 13 with "multi-wave64 exchange requires converged group control flow". The lane-pair
+    build compiles 12 of them as lane pairs and refuses the barrier inside a loop.
 
-  This comparison used a local script that is not in the repository.
+  This comparison used a local script that is not in the repository. It was not repeated for the split-halves
+  fix below, which adds a select to every split-halves `v_readfirstlane_b32` and so changes those modules.
 - App-local WARP 1.0.22 (`d3d10warp.dll` 1.0.22.0.20261027.1 beside the replay executable, in-box D3D12 runtime).
   A local script replayed the fixture's requests with `--direct-warp` in place of `--direct`, 12 times each:
   - all 17 asserted readbacks matched in every run;
@@ -125,6 +129,16 @@ Two results are not asserted for the 64-thread split-halves runs:
 - An independent run of the first commit of this change on an RTX 4070 and on WARP 1.0.22 is recorded in
   [the pull request](https://github.com/R0Y00/Xbox2Windows/pull/3352#issuecomment-7239334348). There
   `dpp_permlane_divergent` differed on WARP under both layouts (88 words). It matched here.
+
+Split-halves `v_readfirstlane_b32` under an empty EXEC, the same base plus the split-halves fix, on the RTX 4090
+only (the WARP runs above predate the fix):
+
+- Both tests passed. The nine 128-thread programs and `exit_before_barrier` matched as lane pairs, and eight of the
+  nine matched as split halves with 64 threads, `readfirstlane_empty` included. The same 16 negative controls
+  reported a mismatch.
+- With the old selection put back in the same tree, `native_wave64_lane_pairs_hardware` failed at
+  `readfirstlane_empty` with 64 threads: word 8, got `0x00002005` (guest lane 32's value), expected `0x00000005`
+  (lane 0's). The six split-halves programs ahead of it in the run still matched.
 
 ## Limits
 

@@ -3265,8 +3265,9 @@ struct DirectCompute {
             first = select(cmp("eq", mask, "0"), "0", first);
             auto value = ir.invoke("i32", "waveReadLaneAt.i32", 117, {{"i32", val(0)}, {"i32", first}}, "nounwind");
             if (wave64) {
+                // Each half answers with its own lane 0 for an empty word, so an empty EXEC keeps the lower half's guest lane 0.
                 auto candidates = exchange_halves(value);
-                value = select(cmp("ne", low, "0"), candidates[0], candidates[1]);
+                value = select(cmp("ne", low, "0"), candidates[0], select(cmp("ne", read(127), "0"), candidates[1], candidates[0]));
             }
             write(i.dst, value);
             return;

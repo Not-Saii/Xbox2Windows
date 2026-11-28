@@ -415,9 +415,6 @@ PROGRAMS = {
 }
 # Split halves race on the shared LDS word, so this result is asserted for lane pairs only.
 PAIRS_ONLY = {"lds_same_address"}
-# Split halves return guest lane 32 for v_readfirstlane_b32 under an empty EXEC (the lowering picks the
-# upper half when the low EXEC word is zero), not lane 0. Not asserted for split halves until that is fixed.
-SPLIT_KNOWN_MISMATCH = {"readfirstlane_empty"}
 # Negative-control programs, each checked against the unmodified expectation of its base program.
 VARIANTS = {
     "mask_readlane/lane8": ("mask_readlane", {"lane": 8}),
@@ -575,15 +572,14 @@ def negative_controls(layout, threads, readbacks):
 def hardware(cli, tool, sdk, work):
     names = list(PROGRAMS) + list(VARIANTS)
     sets = (("lane pairs", 128, names),
-            ("split halves", 64, [name for name in names if name not in PAIRS_ONLY | SPLIT_KNOWN_MISMATCH]))
+            ("split halves", 64, [name for name in names if name not in PAIRS_ONLY]))
     for layout, threads, subset in sets:
         readbacks = run_set(cli, tool, sdk, work, threads, subset)
         if readbacks == 77:
             return 77
         for name in PROGRAMS:
             if name not in subset:
-                why = "lane-pair result only" if name in PAIRS_ONLY else "known split-halves mismatch"
-                print(f"{name}, {size(name, threads)} threads ({layout}): not asserted ({why})")
+                print(f"{name}, {size(name, threads)} threads ({layout}): not asserted (lane-pair result only)")
                 continue
             mismatch = first_mismatch(readbacks[name], PROGRAMS[name][1](threads))
             assert mismatch is None, (layout, threads, name, mismatch)
