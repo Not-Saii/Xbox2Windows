@@ -459,7 +459,8 @@ static std::optional<unsigned> carry_destination(const Inst &i) {
 }
 struct Symbol {
     enum class Type { unknown, constant, masked, table, descriptor, indexed_descriptor, root_address, primitive_mask,
-                      stride, byte_stride, zero_stride_word, byte_count, clear_oob, byte_oob, lane_mask, uniform_mask, unbound } type{};
+                      stride, byte_stride, zero_stride_word, byte_count, clear_oob, byte_oob, lane_mask, uniform_mask,
+                      heap_offset, heap_carry, unbound } type{};
     Word value = 0, offset = 0;
     unsigned index_mask = 0, definition = 0;
     bool numeric() const { return type == Type::unknown || type == Type::constant || type == Type::masked || type == Type::uniform_mask; }
@@ -471,6 +472,8 @@ struct State {
     // Encoded VGPR and guest lane. A join can lose the identity while
     // retaining the fact that some path omitted the runtime lane write.
     std::map<std::pair<unsigned, unsigned>, std::optional<Symbol>> lane_spills;
+    // SCC, tracked only as the carry of a heap offset add (see heap_offset_add).
+    Symbol scc{};
     Symbol &operator[](unsigned n) { return scalar[n]; }
     const Symbol &operator[](unsigned n) const { return scalar[n]; }
     const Symbol &at(unsigned n) const { return scalar.at(n); }
@@ -563,6 +566,30 @@ Symbol source(const Inst &i, unsigned code, const State &s) {
         return {Symbol::Type::constant, i.literal};
     return {};
 }
+// The low word of a resource-heap descriptor address formed by adding a byte offset, as in a waterfall loop over a
+// lane-selected slot: s_add_u32 lo, <resource heap>, <byte offset SGPR>, then the carry into the high word. Returns the
+// operand index of the offset. A constant offset is not matched: the selected slot must come from GPU data.
+static std::optional<unsigned> heap_offset_add(const Inst &i, const State &s) {
+    if (i.name != "s_add_u32" || i.dst > 105) return {};
+    for (unsigned k = 0; k < 2; ++k) {
+        const auto heap = source(i, i.src[k], s), offset = source(i, i.src[1 - k], s);
+        if (heap.type == Symbol::Type::table && heap.value == compute_resource_heap && !heap.offset &&
+            i.src[1 - k] <= 105 && offset.numeric() && offset.type != Symbol::Type::constant)
+            return 1 - k;
+    }
+    return {};
+}
+// The high word of that address: s_add_u32 hi, 0, src_scc or s_addc_u32 hi, 0, 0.
+static bool heap_offset_carry(const Inst &i) {
+    return i.dst <= 105 && ((i.name == "s_add_u32" && ((i.src[0] == 128 && i.src[1] == 253) ||
+                                                       (i.src[0] == 253 && i.src[1] == 128))) ||
+                            (i.name == "s_addc_u32" && i.src[0] == 128 && i.src[1] == 128));
+}
+// s[base:base+1] holds the resource-heap base plus a byte offset with its own carry in the high word.
+static bool heap_offset_address(const State &s, unsigned base) {
+    return base + 1 < s.size() && s[base].type == Symbol::Type::heap_offset &&
+           s[base + 1].type == Symbol::Type::heap_carry && s[base + 1].definition == s[base].definition;
+}
 // Derive the rewritten byte-address V# symbolically. Each field carries its
 // source table/slot identity. Numeric consumption still requires real bits.
 // heap_window: the direct path under HeapViewContract::raw_buffer also rewrites a
@@ -601,6 +628,10 @@ State transfer(const Inst &i, State s, bool wave64, bool graphics, bool heap_win
             refuse(i.pc, "invalid SGPR");
         s[n] = v;
     };
+    const Symbol carry = s.scc;
+    if (i.enc == Encoding::Sop1 || i.enc == Encoding::Sop2 || i.enc == Encoding::Sopc || i.enc == Encoding::Sopk)
+        s.scc = {};
+    const auto heap_add = direct && !graphics ? heap_offset_add(i, s) : std::nullopt;
     if (direct && !graphics) {
         if (i.name == "v_writelane_b32") {
             if (auto lane = guest_spill_lane(i, wave64)) {
@@ -634,6 +665,13 @@ State transfer(const Inst &i, State s, bool wave64, bool graphics, bool heap_win
                (i.src[0] == 193 || i.src[0] == 128) && (i.src[1] == 193 || i.src[1] == 128)) {
         set(i.dst,{Symbol::Type::uniform_mask,i.pc,0});
         set(i.dst+1,{Symbol::Type::uniform_mask,i.pc,1});
+    } else if (heap_add) {
+        const auto offset = source(i, i.src[*heap_add], s);
+        set(i.dst, {Symbol::Type::heap_offset, compute_resource_heap, 0,
+                    offset.type == Symbol::Type::masked ? offset.value : ~0u, i.pc});
+        s.scc = {Symbol::Type::heap_carry, compute_resource_heap, 0, 0, i.pc};
+    } else if (direct && !graphics && carry.type == Symbol::Type::heap_carry && heap_offset_carry(i)) {
+        set(i.dst, carry);
     } else if (auto field = byte_descriptor_field(i,s,heap_window)) {
         set(i.dst,*field);
     } else if (i.enc == Encoding::FixedSetup) {
@@ -645,9 +683,12 @@ State transfer(const Inst &i, State s, bool wave64, bool graphics, bool heap_win
         const unsigned offset_reg = i.b >> 25;
         const Symbol index = offset_reg < smem_sgpr_limit(!graphics && !wave64) ? s[offset_reg] : Symbol{};
         unsigned n = memory_count(i);
+        const bool heap_address = i.op == 2 && i.b >> 25 == 125 && heap_offset_address(s, i.src[0]);
         for (unsigned j = 0; j < n; ++j) {
             Symbol v{};
-            if (i.op == 2 && i.b >> 25 != 125 && base.type == Symbol::Type::table) {
+            if (heap_address) {
+                v = {Symbol::Type::indexed_descriptor, compute_resource_heap, (i.b & 0xfffff) + 4 * j, base.index_mask, i.pc};
+            } else if (i.op == 2 && i.b >> 25 != 125 && base.type == Symbol::Type::table) {
                 v = {Symbol::Type::indexed_descriptor, base.value, (i.b & 0xfffff) + 4*j,
                      index.type == Symbol::Type::masked || index.type == Symbol::Type::constant ? index.value : ~0u, i.pc};
             } else if (i.op < 8 && base.type == Symbol::Type::table)
@@ -843,6 +884,10 @@ Program parse(const string &code, unsigned entry, const State &initial, bool gra
                             changed = true;
                         }
                     }
+                if (!(in.scc == after.scc) && !(in.scc == Symbol{})) {
+                    in.scc = {};
+                    changed = true;
+                }
                 for (auto &[key, value] : in.lane_spills) {
                     const auto other = after.lane_spills.find(key);
                     if (value && (other == after.lane_spills.end() || !(other->second == value))) {

@@ -538,6 +538,23 @@ struct DirectCompute {
             const unsigned limit = smem_sgpr_limit(!graphics_input && !wave64);
             const auto &low = s.at(i.src[0]);
             const bool root = low.type == Symbol::Type::root_address;
+            if (low.type == Symbol::Type::heap_offset) {
+                // A resource-heap address formed by s_add_u32 (heap_offset_add): the same slot read as the SGPR-offset
+                // load below, with the byte offset in the low word.
+                if (!heap_offset_address(s, i.src[0]))
+                    refuse(i.pc, "heap descriptor address high word is not the carry of its offset add");
+                if (i.op != 2)
+                    refuse(i.pc, "heap descriptor address must load one descriptor with s_load_dwordx4");
+                refuse_heap_contract(i.pc);
+                if (so != 125)
+                    refuse(i.pc, "heap descriptor address with a second offset register");
+                if (i.b & 0xfffff)
+                    refuse(i.pc, "heap descriptor load with an immediate offset addresses another slot than the captured selection");
+                auto index = ir.binary("lshr", read(i.src[0]), "5");
+                for (unsigned j = 0; j < 4; ++j)
+                    write(i.dst + j, index);
+                return;
+            }
             if (!root && low.type == Symbol::Type::table && low.value == compute_resource_heap) {
                 // Reads from the whole descriptor heap: only the indexed descriptor load of a captured raw buffer slot.
                 if (i.op >= 8)
@@ -2224,6 +2241,14 @@ struct DirectCompute {
     }
     void arithmetic(const Inst &i, const State &state, const string *permuted = nullptr, bool compute = false) {
         auto n = i.name;
+        if (compute) {
+            if (const auto offset = heap_offset_add(i, state)) {
+                // The heap base is slot 0 of ResourceDescriptorHeap: the low word keeps the byte offset, the carry is 0.
+                write(i.dst, operand32(i, i.src[*offset]));
+                write(128, "0");
+                return;
+            }
+        }
         if (compute && (n == "v_dot4_i32_i8" || n == "v_dot4_u32_u8")) {
             // Integer dot products use both packed words as-is. Require the
             // canonical VOP3P OP_SEL/OP_SEL_HI and zero NEG_LO/NEG_HI.
