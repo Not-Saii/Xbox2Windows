@@ -36,8 +36,11 @@ module therefore takes its lane predicate from a `WaveActiveBallot` of its own, 
 every lane of the wave at that point. Without that ballot, app-local WARP 1.0.22 read words that other lanes had
 not written yet (see Result).
 
-The wave32 path, where one host wave is one guest wave, has no such ballot and is not changed here. A wave32
-program with the same cross-lane read differs on WARP 1.0.22 as well.
+The wave32 model has the same gap. There one host wave is one guest wave, both for a guest wave32 and for a
+narrow guest wave64 (a wave64 request of at most 32 threads), and no barrier stands before an LDS access. Its LDS
+accesses take the predicate from a ballot as well. Only split halves, which meet at the group barrier, keep the
+plain predicate, so their modules and lane-pair modules are unchanged by this. Every wave32 module that uses LDS
+gains one wave operation per LDS access. Its timing was not measured.
 
 ## `s_barrier`
 
@@ -96,6 +99,24 @@ Two results are not asserted for the 64-thread split-halves runs:
 - `readfirstlane_empty`: split halves return lane 32, not lane 0, for an empty EXEC. This is a separate defect of
   that lowering and is not changed here.
 
+### Wave32 LDS order
+
+`tests/native_wave32_lds_order_check.py` runs one program with 32 threads per group, once as a wave32 request and
+once as a narrow wave64 request. Lane l writes LDS word l, reads word 31 − l with no barrier in between and stores
+what it read. The CPU model covers all 2,064 output words, guards included.
+
+- `native_wave32_lds_order_controls` needs no GPU. It checks that each module has the entry ballot, then a ballot
+  before the LDS write and another before the LDS read.
+- `native_wave32_lds_order_hardware` replays with `--direct`; `native_wave32_lds_order_warp` with `--direct-warp`.
+  Both return 77 when replay does. The in-box WARP has 4-lane waves, so the `_warp` test skips unless an app-local
+  WARP sits beside the replay executable, as in [the WARP note](native-compute-warp.md).
+- Negative control in the replay modes: the model in which each lane reads its own word must report a mismatch.
+
+```powershell
+cmake --build --preset dev --target compile_dxil native_store_replay
+ctest --preset dev --no-tests=error -j 1 -R '^native_wave32_lds_order_' -V
+```
+
 ## Result
 
 `main` `052abe6f` plus this change, Debug build. Windows 11 build 26300, NVIDIA GeForce RTX 4090 (driver
@@ -126,14 +147,39 @@ Two results are not asserted for the 64-thread split-halves runs:
   [the pull request](https://github.com/R0Y00/Xbox2Windows/pull/3352#issuecomment-7239334348). There
   `dpp_permlane_divergent` differed on WARP under both layouts (88 words). It matched here.
 
+### Wave32 LDS order
+
+Measured on `3167ecb0` with the wave32 fixture added, Debug build, on the same machine, RTX 4090 and app-local WARP
+1.0.22 as above. "Before" is that build without the wave32 ballot (the condition `lane_pairs` only); "after"
+widens it to `!wave64 || lane_pairs`. Each replay mode ran 12 times by hand; the WARP DLL was copied beside
+`native_store_replay.exe` for those runs and removed afterwards.
+
+| Run | Before | After |
+|---|---|---|
+| `controls` | failed: `wave32` events `ballot, lds, lds` | passed for both requests |
+| `warp` (WARP 1.0.22) | differed in 12 of 12 runs: word 8, expected `0x00001f05`, got `0x00000000` in 9 runs and `0x0000020d`, `0x00000275`, `0x000001da` in the other three | matched in 12 of 12 runs, both requests |
+| `hardware` (RTX 4090) | matched in 12 of 12 runs, both requests | matched in 12 of 12 runs, both requests |
+
+The WARP failures in the Before column all come from the wave32 request, which the fixture checks first. The
+narrow wave64 request was therefore not seen failing before the change. Every replay run reported the own-word
+negative control as a mismatch (word 8, got `0x00001f05`, expected `0x00000005`). After the change
+`native_direct_container`, `native_scalar_lds_hardware` and `native_wave64_lane_pairs_controls|hardware` passed;
+`native_wave32_lds_order_warp` skipped (77) in that ctest run, which used the in-box WARP.
+
 ## Limits
 
-- Two NVIDIA adapters, the second in the independent run above, which predates the ballot. The fixture has no
-  `--direct-warp` mode, so the WARP runs went through local scripts, and the in-box WARP has 4-lane waves (see
-  [the WARP note](native-compute-warp.md)). The debug layer was not enabled, and no dispatch went through the
-  stand-in.
+- Two NVIDIA adapters, the second in the independent run above, which predates the ballot. The lane-pair fixture
+  has no `--direct-warp` mode, so its WARP runs went through local scripts; the wave32 fixture has one. The in-box
+  WARP has 4-lane waves (see [the WARP note](native-compute-warp.md)). The debug layer was not enabled, and no
+  dispatch went through the stand-in. The wave32 fixture ran on the RTX 4090 and WARP 1.0.22 only.
 - The ballot before an LDS access relies on a wave operation gathering every lane of the host wave. D3D12 does
-  not state that. It held on WARP 1.0.22 in these runs; both GPUs matched without the ballot as well.
+  not state that. It held on WARP 1.0.22 in these runs; both GPUs matched without the ballot as well, and the
+  RTX 4090 matched the wave32 fixture without it.
+- WARP 1.0.22 returns a zero ballot for a partial wave
+  ([#3160](https://github.com/R0Y00/Xbox2Windows/issues/3160)). A wave32 module of fewer than 32 threads already
+  starts with a zero EXEC there, so the ballot before an LDS access changes nothing for it on WARP. No partial-wave
+  LDS program was run.
+- The full `^native_` test set was not run on this change; only the tests named in the result above.
 - On hardware, lane pairs ran integer VOP1, VOP2 and VOP3 instructions, compares, `v_cmpx`, DPP row operations,
   `v_permlanex16_b32`, both lane reads, LDS reads and writes, raw buffer stores and one buffer atomic. Buffer
   loads, typed stores, image operations (implicit derivatives included), 16-bit and packed operations go through
