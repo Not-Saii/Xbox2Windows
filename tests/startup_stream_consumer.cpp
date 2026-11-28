@@ -417,7 +417,9 @@ static int dispatch_slot67(IDXGIAdapter* adapter, void* device, const std::strin
         invoke(list, 16, word(&image), 0, 0, 0, word(&source), 0);
         D3D12_SHADER_RESOURCE_VIEW_DESC view{format, D3D12_SRV_DIMENSION_TEXTURE2D, D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING};
         view.Texture2D.MipLevels = 1;
-        if (mode != "dispatch-sampled-unbound") invoke(device, 18, word(texture), word(&view), cpu + (mode == "dispatch-input-token" ? 0 : mode == "dispatch-output-texture-token" ? 16 : 64));
+        if (mode != "dispatch-sampled-unbound") invoke(device, 18, word(texture), word(&view), cpu + (mode == "dispatch-input-token" ? 0 : 64));
+        // Byte 16 is not a descriptor of the heap: the token's words are copied there, as a title copies descriptors.
+        if (mode == "dispatch-output-texture-token") std::memcpy(reinterpret_cast<void*>(cpu + 16), reinterpret_cast<const void*>(cpu + 64), 16);
     }
     if (mode == "dispatch-input-memory-view") {
         // The input is a buffer view (device slot 70) of memory no buffer is placed over, 16 bytes in; its token
