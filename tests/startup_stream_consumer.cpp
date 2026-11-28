@@ -436,6 +436,14 @@ static int dispatch_slot67(IDXGIAdapter* adapter, void* device, const std::strin
         if (mode == "dispatch-uav-token-wrong-slot")
             reinterpret_cast<UINT*>(cpu + 32)[2] = 18;
     }
+    if (mode == "dispatch-srv-token-typed") {
+        // dispatch-srv-token-typed: the input descriptor is the token of a typed buffer view (device slot 18) of the
+        // input buffer; for this mode the input's word 3 field is the view's DXGI format, its records field the elements.
+        D3D12_SHADER_RESOURCE_VIEW_DESC view{static_cast<DXGI_FORMAT>(fields[0][2]), D3D12_SRV_DIMENSION_BUFFER,
+                                             D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING};
+        view.Buffer.NumElements = fields[0][1];
+        invoke(device, 18, word(placed[0]), word(&view), cpu);
+    }
     const bool heap_record = mode.rfind("dispatch-heap", 0) == 0 && !heap_waterfall;
     if (heap_record)
         for (const UINT at : {0u, 32u, 64u})
