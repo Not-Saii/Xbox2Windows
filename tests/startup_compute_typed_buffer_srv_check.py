@@ -1,7 +1,7 @@
 """Publish a synthetic slot 67 program with buffer_load_format_* and check its typed buffer input (#3224).
 
 The program reads input element `index` with buffer_load_format_<n> (IDXEN) from table byte 0 and stores the n
-dwords raw at output byte 4 * n * index (table byte 16). compile_dxil publishes `srv 0 typed table 1 0 bytes 4n`;
+dwords raw at output byte 4 * n * index (table byte 32). compile_dxil publishes `srv 0 typed table 1 0 bytes 4n`;
 the stand-in binds a UINT view of the title's 32-bit components. Fewer records than lanes checks the zeros past
 the view's last element.
 
@@ -36,7 +36,7 @@ def program(channels):
               vop2(0x1a, 9, 128 + {1: 2, 2: 3, 4: 4}[channels], 8))     # v9 = v8 << log2(4n)
     words = [
         sop1(3, 20, 6), sop1(3, 21, 128),
-        0xf408080a, 0xfa000010,                 # output descriptor s[32:35], table byte 16
+        0xf408080a, 0xfa000020,                 # output descriptor s[32:35], table byte 32
         0xf408090a, 0xfa000000,                 # input descriptor s[36:39], table byte 0
         0xbf8cc07f,                             # s_waitcnt lgkmcnt(0)
         scalar(0x26, 8, 8, 131),                # 3 * group.y
@@ -75,7 +75,7 @@ def publish(compile_dxil, sdk, cache, key, channels):
     manifest = cache / f'{key}.txt'
     assert result.returncode == 0 and manifest.is_file(), (result.stdout, result.stderr)
     text = manifest.read_text().splitlines()
-    assert f'srv 0 typed table 1 0 bytes {4 * channels}' in text and 'uav 0 table 1 16' in text, text
+    assert f'srv 0 typed table 1 0 bytes {4 * channels}' in text and 'uav 0 table 1 32' in text, text
 
 
 def check_compiler(compile_dxil, sdk):
@@ -99,7 +99,7 @@ def check(compile_dxil, consumer, sdk, work, adapter, channels):
     word3 = 0x01000fac | FLOAT_FORMATS[channels] << 12
     untouched = [SENTINEL] * WORDS
 
-    def run(stride=4 * channels, records=RECORDS, descriptor_word=word3, mode='dispatch', *, probe=False):
+    def run(stride=4 * channels, records=RECORDS, descriptor_word=word3, mode='dispatch-records32', *, probe=False):
         fields.write_bytes(struct.pack('<6I', stride, records, descriptor_word, 4, output_records(channels), 0))
         return dispatch(work, consumer, env, mode, probe=probe)
 

@@ -397,7 +397,8 @@ static int dispatch_slot67(IDXGIAdapter* adapter, void* device, const std::strin
         std::memcpy(reinterpret_cast<void*>(cpu + 64), window, sizeof(window));
         std::memcpy(reinterpret_cast<void*>(cpu + 32), descriptors[1], sizeof(descriptors[1]));
     }
-    if (mode == "dispatch-records32" || typed_output_offset || shared_uav) {  // output at byte 32, none at byte 16
+    if (mode == "dispatch-records32" || typed_output_offset || shared_uav ||
+        mode == "dispatch-srv-token-typed") {  // output at byte 32, none at byte 16
         std::memset(reinterpret_cast<void*>(cpu + sizeof(descriptors[0])), 0, sizeof(descriptors[1]));
         std::memcpy(reinterpret_cast<void*>(cpu + 32), descriptors[1], sizeof(descriptors[1]));
     }
