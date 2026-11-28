@@ -59,6 +59,7 @@ int main() {
         {"SRV registers not contiguous", [](auto &p) { p.bindings[0].shader_register = 1; }},
         {"UAV registers not contiguous", [](auto &p) { p.bindings[1].shader_register = 1; }},
         {"SRV kind root_buffer_srv", [](auto &p) { p.bindings[0].kind = K::root_buffer_srv; }},
+        {"SRV kind indexed_raw_srv", [](auto &p) { p.bindings[0].kind = K::indexed_raw_srv; }},
         {"SRV kind texture_srv cube", [](auto &p) {
              p.bindings[0].kind = K::texture_srv;
              p.bindings[0].image_dimension = 3;
