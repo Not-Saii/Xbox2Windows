@@ -31,3 +31,7 @@ sentinel. The common-state case also checks that its buffer was aliased. `dispat
 ```powershell
 ctest --preset dev --no-tests=error -R "^startup_compute_dispatch(_output)?_(warp|hardware)$" -V
 ```
+
+Both tests pass on WARP (10.0.26100.9818) and on an RTX 4090 (driver 32.0.16.1088), Windows 11 build 26300,
+debug layer on. With only the split reverted, the unchanged dispatch still matches and all nine cases are still
+refused, each with the old reason, so all nine expectations fail: the set of refused cases is the same.
