@@ -18,13 +18,29 @@
    - Strips PC offsets and normalizes hex words, byte offsets, and register indices so repeated failures
      across different instructions or requests aggregate into one row.
 
+3. **Compute programs without a runtime manifest (#3224):**
+   - A slot-67 compute program that translates but that `format_compute_runtime_manifest`
+     (`src/direct_compute_cache.cpp`) cannot describe gets one fixed reason, for example
+     `unsupported startup runtime manifest bindings: SRV kind root_buffer_srv`. The reasons name the
+     exit: a zero group dimension, root constants above parameter 15 or more than 8 in one parameter,
+     more than 32 user data words, a resource or sampler heap view, a view above root parameter 15,
+     non-contiguous SRV or UAV registers, an SRV or UAV kind with no manifest line (the kind, and for
+     images the dimension and `array`), more than 32 SRVs or 8 UAVs, a comparison sampler, and stride
+     words from a view that is not one raw vector SRV. No register numbers, offsets or keys.
+   - `--requests` still publishes `<key>.cs.cso` and no `<key>.txt`, and still counts the request as
+     compiled; it now also writes the reason to `<key>.fail`. `--watch` writes the same line instead of
+     the former reasonless one, and `--refusals` counts the request under it instead of under
+     no refusal. `triage_run.py` reports it as `runtime manifest: <reason>`.
+   - With `X2W_SKIP_FAILED=1` / `--skip-failed`, the Python watcher skips such a key when the output
+     directory is used as a live cache, as it already did after `--watch` wrote its `.fail`.
+
 ## Verification
 
 ```powershell
 .\tools\dev.ps1
 cmake --preset release
-cmake --build --preset release --target compile_dxil
-ctest --preset release --no-tests=error -V -R "^native_compile_dxil_refusals$"
+cmake --build --preset release --target compile_dxil native_compute_manifest_reasons
+ctest --preset release --no-tests=error -V -R "^(native_compile_dxil_refusals|native_compute_manifest_reasons(_requests)?)$"
 .\out\pe-env\Scripts\python.exe -B tests/startup_triage_run_check.py
 ```
 
